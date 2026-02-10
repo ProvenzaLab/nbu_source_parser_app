@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import json
-from perceptparser.percept_parser.percept import PerceptParser
+from percept_parser.percept import PerceptParser
 
 TZ = ZoneInfo("America/Chicago")
 STUDY_IDS = {'AA': 'AA-56119', 'TRBD': 'TRBD-53761', 'P': 'PerceptOCD-48392'}
