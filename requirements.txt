@@ -1,6 +1,0 @@
-﻿PySide6
-matplotlib
-numpy
-pandas
-tqdm
-scipy

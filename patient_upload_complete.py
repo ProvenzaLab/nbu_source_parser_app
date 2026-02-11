@@ -1,5 +1,7 @@
 import sys
 import os
+import subprocess
+import glob
 from datetime import datetime
 from pathlib import Path
 
@@ -7,7 +9,7 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QDateTimeEdit, QFrame, 
-    QGroupBox, QGridLayout, QMessageBox
+    QGroupBox, QGridLayout, QMessageBox, QFileDialog
 )
 from PySide6.QtCore import Qt, QDateTime, QThread, Signal
 from PySide6.QtGui import QFont
@@ -24,7 +26,9 @@ except (ImportError, Exception) as e:
     print(f"Warning: Matplotlib not available. {str(e)}")
 
 from data_viz_plot import main as plot_data_summary
-from data_viz_plot import DATALAKE, ROOT
+from data_viz_plot import DATALAKE, STUDY_IDS
+
+from prepare_files import sort_lfp, sort_cgx
 
 # ============================================================================
 # DATA PROCESSOR
@@ -39,13 +43,21 @@ class DataProcessor:
     def process_lfp_upload(self, patient_id, visit_start, visit_end):
         """Upload LFP data - IMPLEMENT YOUR LOGIC HERE"""
         try:
-            # TODO: Run LFP source parser
-            
+            # Prompt user to select all LFP files, move to parser-ready directoy,
+            lfp_dir = QFileDialog.getExistingDirectory(
+                        None, "Select tablet Documents folder containing downloaded JSONs & PDFs")
+
+            json_files = glob.glob(f'{lfp_dir}/*.json')
+            pdf_files = glob.glob(f'{lfp_dir}/*.pdf')
+            sort_lfp(json_files, pdf_files, patient_id)
+
+            # Run LFP source parser
+            result = subprocess.run(["/home/nbusleep/BCM/CODE/scripts/run_lfp_parser.sh"], capture_output=True, text=True)
+
             return {
-                'records_uploaded': 1000,
+                'records_uploaded': len(json_files) + len(pdf_files),
                 'timestamp': datetime.now().isoformat(),
-                'file_path': f'{self.data_root_path}/{patient_id}/lfp/',
-                'status': 'success'
+                'status': f'{result.returncode}'
             }
         except Exception as e:
             raise Exception(f"LFP upload failed: {str(e)}")
@@ -53,47 +65,33 @@ class DataProcessor:
     def process_audio_video_upload(self, patient_id, visit_start, visit_end):
         """Upload audio/video data - IMPLEMENT YOUR LOGIC HERE"""
         try:
-            # TODO: Run A/V source parser
+            # Run A/V source parser
+            result = subprocess.run(["/home/nbusleep/BCM/CODE/scripts/run_av_parser.sh"], capture_output=True, text=True)
+
             return {
-                'files_uploaded': 5,
+                'files_uploaded': 0, # Change this to read file log
                 'timestamp': datetime.now().isoformat(),
-                'status': 'success'
+                'status': f'{result.returncode}'
             }
         except Exception as e:
             raise Exception(f"Audio/Video upload failed: {str(e)}")
     
-    def process_task_upload(self, patient_id, visit_start, visit_end):
-        """Upload task data - IMPLEMENT YOUR LOGIC HERE"""
-        try:
-            # TODO: Run Task source parser
-            return {
-                'tasks_uploaded': 10,
-                'timestamp': datetime.now().isoformat(),
-                'status': 'success'
-            }
-        except Exception as e:
-            raise Exception(f"Task upload failed: {str(e)}")
-    
-    def process_logger_upload(self, patient_id, visit_start, visit_end):
-        """Upload logger data - IMPLEMENT YOUR LOGIC HERE"""
-        try:
-            # TODO: Run Logger source parser
-            return {
-                'logs_uploaded': 50,
-                'timestamp': datetime.now().isoformat(),
-                'status': 'success'
-            }
-        except Exception as e:
-            raise Exception(f"Logger upload failed: {str(e)}")
-    
     def process_cgx_upload(self, patient_id, visit_start, visit_end):
         """Upload CGX data - IMPLEMENT YOUR LOGIC HERE"""
         try:
-            # TODO: Run CGX source parser
+            # Prompt user to select CGX drive, move to parser-ready directory
+            cgx_dir = QFileDialog.getExistingDirectory(
+                        None, "Select CGX SD card drive")
+            cgx_files = glob.glob(f'{cgx_dir}/*.cgx')
+            sort_cgx(cgx_files, patient_id)
+
+            #  Run CGX source parser
+            result = subprocess.run(["/home/nbusleep/BCM/CODE/scripts/run_cgx_parser.sh"], capture_output=True, text=True)
+
             return {
-                'records_uploaded': 200,
+                'records_uploaded': len(cgx_files),
                 'timestamp': datetime.now().isoformat(),
-                'status': 'success'
+                'status': f'{result.returncode}'
             }
         except Exception as e:
             raise Exception(f"CGX upload failed: {str(e)}")
@@ -125,8 +123,6 @@ class UploadWorker(QThread):
             method_map = {
                 'lfp': self.processor.process_lfp_upload,
                 'audio_video': self.processor.process_audio_video_upload,
-                'task': self.processor.process_task_upload,
-                'logger': self.processor.process_logger_upload,
                 'cgx': self.processor.process_cgx_upload
             }
             
@@ -159,7 +155,7 @@ class VisualizationWidget(QWidget):
         layout = QVBoxLayout()
         
         if MATPLOTLIB_AVAILABLE:
-            self.figure = Figure(figsize=(15, 8))
+            self.figure = Figure(figsize=(10, 7))
             self.canvas = FigureCanvas(self.figure)
             layout.addWidget(self.canvas)
             
@@ -185,6 +181,9 @@ class VisualizationWidget(QWidget):
         self.figure.tight_layout()
         self.canvas.draw()
 
+        # Lab worlds folder
+        self.figure.savefig(Path('/mnt/projectworlds') / STUDY_IDS[upload_worker.patient_id[:-3]] / upload_worker.patient_id / 'NBU_visits' / f'{upload_worker.patient_id}_{upload_worker.visit_start}_visit_plot.pdf', bbox_inches='tight')
+
 
 # ============================================================================
 # MAIN APPLICATION
@@ -205,8 +204,6 @@ class PatientDataUploadApp(QMainWindow):
         self.upload_status = {
             'lfp': None,
             'audio_video': None,
-            'task': None,
-            'logger': None,
             'cgx': None
         }
         self.workers = {}
@@ -239,15 +236,15 @@ class PatientDataUploadApp(QMainWindow):
         header.setStyleSheet("""
             QFrame {
                 background-color: white;
-                border-radius: 10px;
-                padding: 15px;
+                border-radius: 5px;
+                padding: 5px;
             }
         """)
         
         layout = QVBoxLayout(header)
         
         title = QLabel('NBU Data Upload Interface')
-        title.setFont(QFont('Arial', 24, QFont.Bold))
+        title.setFont(QFont('Arial', 16, QFont.Bold))
         title.setStyleSheet("color: #1E293B;")
         
         subtitle = QLabel('Upload NBU data streams to Datalake')
@@ -335,16 +332,12 @@ class PatientDataUploadApp(QMainWindow):
         self.upload_buttons = {
             'lfp': self.create_upload_button('Run LFP Source Parser', 'lfp'),
             'audio_video': self.create_upload_button('Run A/V Source Parser', 'audio_video'),
-            'task': self.create_upload_button('Run Task Source Parser', 'task'),
-            'logger': self.create_upload_button('Run Logger Source Parser', 'logger'),
-            'cgx': self.create_upload_button('Upload CGX Data', 'cgx')
+            'cgx': self.create_upload_button('Run CGX Source Parser', 'cgx')
         }
         
         layout.addWidget(self.upload_buttons['lfp'], 0, 0)
         layout.addWidget(self.upload_buttons['audio_video'], 0, 1)
-        layout.addWidget(self.upload_buttons['task'], 0, 2)
-        layout.addWidget(self.upload_buttons['logger'], 1, 0)
-        layout.addWidget(self.upload_buttons['cgx'], 1, 1)
+        layout.addWidget(self.upload_buttons['cgx'], 0, 2)
         
         group.setLayout(layout)
         return group
@@ -366,9 +359,9 @@ class PatientDataUploadApp(QMainWindow):
         group.setStyleSheet("""
             QGroupBox {
                 background-color: white;
-                border-radius: 10px;
-                padding: 15px;
-                margin-top: 10px;
+                border-radius: 5px;
+                padding: 5px;
+                margin-top: 5px;
             }
         """)
         

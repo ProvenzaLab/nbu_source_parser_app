@@ -3,7 +3,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.patches as mpatches
-import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 import random
 import os
@@ -16,9 +15,9 @@ from percept_parser.percept import PerceptParser
 
 TZ = ZoneInfo("America/Chicago")
 STUDY_IDS = {'AA': 'AA-56119', 'TRBD': 'TRBD-53761', 'P': 'PerceptOCD-48392'}
-LOGGER_COLORS = cm.get_cmap('Set2').colors
-DATALAKE = Path('/mnt/datalake/data')
-ROOT = Path('/') # TODO: Change to data drive on local Sleep PC
+LOGGER_COLORS = plt.get_cmap('Set2').colors
+DATALAKE = Path('/mnt/datalake')
+ROOT = Path('/home/nbusleep/data') 
 
 def get_folders_in_range(parent_dir, start_folder_name, end_folder_name):
     """
@@ -130,17 +129,24 @@ def find_continuous_segments(times, max_gap=1.0):
 
 def read_lfp_data(pt, visit_start):
     study_id = STUDY_IDS[pt[:-3]]
+    # Lab worlds folder
+    target_folder = Path('/mnt/projectworlds') / study_id / pt / 'NBU_visits'
+    os.makedirs(target_folder, exist_ok=True)
 
     # Gather all LFP files that were 'uploaded' (modified) after the visit start
     lfp_path = DATALAKE / study_id / pt / 'LFP'
     paths = glob.glob(os.path.join(f'{lfp_path}/**/*.json'), recursive=True)
 
     lfp_files = []
+    start_timestamp = visit_start.replace(tzinfo=None)
     for fp in paths:
         mod_time = datetime.fromtimestamp(os.path.getmtime(fp))
-        if visit_start < mod_time:
+        if start_timestamp < mod_time:
             lfp_files.append(fp)
 
+    if len(lfp_files) == 0:
+        return None
+    
     # Run percept parser on the LFP files to create a single dataframe
     chunks = []
     for filename in lfp_files:
@@ -178,8 +184,8 @@ def read_lfp_data(pt, visit_start):
 
     # Convert timestamps to Central + create times column
     pt_df['times'] = pt_df.index.to_series().dt.tz_localize('UTC').dt.tz_convert('America/Chicago')
-    
-    pt_df.to_pickle(ROOT / f'{pt}/{visit_start.strftime("%Y-%m-%d_%H-%M-%S")}_timedomain.pkl')
+
+    pt_df.to_pickle(target_folder / f'{visit_start.strftime("%Y-%m-%d_%H-%M-%S")}_visit_timedomain.pkl')
     return pt_df
 
 
@@ -194,6 +200,9 @@ def main(pt, visit_start, visit_end, ax):
 
     lfp_df = read_lfp_data(pt, visit_start)
 
+    if lfp_df is None:
+        return ax
+    
     lfp_df.dropna(subset=lfp_df.columns.difference(['filename', 'times']), how='all', inplace=True)
     lfp_df.sort_values(by='times', inplace=True)
 
@@ -250,7 +259,6 @@ def main(pt, visit_start, visit_end, ax):
                 if log_end < log_start or log_start < visit_start or visit_end < log_start:
                     continue   
 
-
                 label = f"{log_start.strftime('%I:%M %p')} - {log_end.strftime('%I:%M %p')}: {log_row['Event']}"
                 if log_row['Event'] not in log_colors:
                     log_colors[log_row['Event']] = LOGGER_COLORS[col_idx]
@@ -278,7 +286,7 @@ def main(pt, visit_start, visit_end, ax):
 
             if visit_start < sleep_start and sleep_end < visit_end:
                 ax.axvspan(sleep_start, sleep_end, ymin=0.85, ymax=0.87, color='lightblue', zorder=5)
-                ax.text(sleep_start, 0.88, f'Oura {type}', zorder=5, fontsize=8, va='bottom', ha='left')
+                ax.text(sleep_start, 0.88, f'{type}', zorder=5, fontsize=8, va='bottom', ha='left')
 
     # Add oura met data
     met_inset = ax.inset_axes([0, 0.5, 1, 0.1])
@@ -369,7 +377,6 @@ def main(pt, visit_start, visit_end, ax):
        
         label = f'CGX sleep starting {start_date}'
         ax.axvspan(cgx_start, cgx_end, ymin=0.93, ymax=0.95, color='purple', zorder=5)
-        ax.text(cgx_start, 0.96, label, zorder=5, fontsize=8, va='bottom', ha='left')
 
     # Add vertical dotted lines for each day
     current_day = visit_start.replace(hour=0, minute=0, second=0, microsecond=0)
