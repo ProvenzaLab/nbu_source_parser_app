@@ -8,22 +8,7 @@
 ### 1. Install Dependencies
 
 ```bash
-pip install -r requirements_pyside.txt
-```
-
-### 2. Optional Database Drivers
-
-Depending on your database:
-
-```bash
-# PostgreSQL
-pip install psycopg2-binary
-
-# MySQL
-pip install pymysql
-
-# MongoDB
-pip install pymongo
+pip install -r requirements.txt
 ```
 
 ## Quick Start
