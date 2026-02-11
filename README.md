@@ -30,7 +30,5 @@ python patient_upload_complete.py
 Click the upload buttons for each data stream you want to upload:
 - **Upload LFP Data**
 - **Upload Audio/Video Data**
-- **Upload Task Data**
-- **Upload Logger Data**
 - **Upload CGX Data**
 
