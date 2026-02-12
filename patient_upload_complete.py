@@ -5,7 +5,7 @@ import glob
 from datetime import datetime
 from pathlib import Path
 
-# Import PySide6 components
+# Import PyQt6 components
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QDateTimeEdit, QFrame, 
@@ -156,7 +156,7 @@ class VisualizationWidget(QWidget):
             self.canvas.draw()
         except:
             label = QLabel("Matplotlib not installed.\nInstall with: pip install matplotlib")
-            label.setAlignment(Qt.AlignCenter)
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             label.setStyleSheet("color: #666; font-size: 14px;")
             layout.addWidget(label)
         
@@ -164,9 +164,6 @@ class VisualizationWidget(QWidget):
     
     def update_plot(self, upload_worker):
         """Update visualization with uploaded data"""
-        if not MATPLOTLIB_AVAILABLE or not upload_worker:
-            return
-        
         self.ax.clear()
         
         self.ax = plot_data_summary(upload_worker.patient_id, upload_worker.visit_start, upload_worker.visit_end, self.ax)
@@ -236,7 +233,7 @@ class PatientDataUploadApp(QMainWindow):
         layout = QVBoxLayout(header)
         
         title = QLabel('NBU Data Upload Interface')
-        title.setFont(QFont('Arial', 16, QFont.bold))
+        title.setFont(QFont('Arial', 16, QFont.Weight.Bold))
         title.setStyleSheet("color: #1E293B;")
         
         subtitle = QLabel('Upload NBU data streams to Datalake')
@@ -251,7 +248,7 @@ class PatientDataUploadApp(QMainWindow):
     def create_patient_info_section(self):
         """Create patient info section"""
         group = QGroupBox('Patient Information')
-        group.setFont(QFont('Arial', 12, QFont.bold))
+        group.setFont(QFont('Arial', 12, QFont.Weight.Bold))
         group.setStyleSheet("""
             QGroupBox {
                 background-color: white;
@@ -305,7 +302,7 @@ class PatientDataUploadApp(QMainWindow):
     def create_upload_section(self):
         """Create upload buttons section"""
         group = QGroupBox('Data Stream Upload')
-        group.setFont(QFont('Arial', 12, QFont.bold))
+        group.setFont(QFont('Arial', 12, QFont.Weight.Bold))
         group.setStyleSheet("""
             QGroupBox {
                 background-color: white;
@@ -339,7 +336,7 @@ class PatientDataUploadApp(QMainWindow):
         button = QPushButton(text)
         button.setMinimumHeight(50)
         button.setFont(QFont('Arial', 11))
-        button.setCursor(Qt.PointingHandCursor)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
         button.clicked.connect(lambda: self.handle_upload(data_type))
         self.update_button_style(button, None)
         return button
@@ -347,7 +344,7 @@ class PatientDataUploadApp(QMainWindow):
     def create_visualization_section(self):
         """Create visualization section"""
         group = QGroupBox('Data Visualization')
-        group.setFont(QFont('Arial', 12, QFont.bold))
+        group.setFont(QFont('Arial', 12, QFont.Weight.Bold))
         group.setStyleSheet("""
             QGroupBox {
                 background-color: white;
@@ -408,8 +405,8 @@ class PatientDataUploadApp(QMainWindow):
             QMessageBox.warning(self, 'Error', 'Please enter Patient ID')
             return
         
-        visit_start = self.visit_start_input.dateTime().toString(Qt.ISODate)
-        visit_end = self.visit_end_input.dateTime().toString(Qt.ISODate)
+        visit_start = self.visit_start_input.dateTime().toString(Qt.DateFormat.ISODate)
+        visit_end = self.visit_end_input.dateTime().toString(Qt.DateFormat.ISODate)
         
         button = self.upload_buttons[data_type]
         self.update_button_style(button, 'uploading')
