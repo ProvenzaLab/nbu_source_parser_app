@@ -193,13 +193,27 @@ def main(pt, visit_start, visit_end, ax):
     visit_start = datetime.strptime(visit_start, '%Y-%m-%dT%H:%M:%S').replace(tzinfo=TZ)
     visit_end = datetime.strptime(visit_end, '%Y-%m-%dT%H:%M:%S').replace(tzinfo=TZ)
     
-    logger_files = get_files_from_folder(pt, visit_start, visit_end, 'logger')
-    oura_sleep_files = get_files_from_folder(pt, visit_start, visit_end, 'oura_sleep')
-    oura_met_files = get_files_from_folder(pt, visit_start, visit_end, 'oura_activity')
-    cgx_files = get_files_from_folder(pt, visit_start, visit_end, 'cgx')
+    try:
+        logger_files = get_files_from_folder(pt, visit_start, visit_end, 'logger')
+    except FileNotFoundError:
+        print(f'No logger data uploaded to Elias for {pt}, {visit_start} visit')
 
-    lfp_df = read_lfp_data(pt, visit_start)
+    try:
+        oura_sleep_files = get_files_from_folder(pt, visit_start, visit_end, 'oura_sleep')
+        oura_met_files = get_files_from_folder(pt, visit_start, visit_end, 'oura_activity')
+    except FileNotFoundError:
+        print(f'No Oura data on Elias for {pt} between {visit_start} and {visit_end}')
 
+    try:
+        cgx_files = get_files_from_folder(pt, visit_start, visit_end, 'cgx')
+    except FileNotFoundError:
+        print(f'No CGX data uploaded to Elias for {pt} on {visit_start} visit')
+
+    try:
+        lfp_df = read_lfp_data(pt, visit_start)
+    except Exception as e:
+        print(f'Error retrieving LFP data for {pt} on {visit_start} visit: {e}')
+        return ax
     if lfp_df is None:
         return ax
     

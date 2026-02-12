@@ -6,24 +6,19 @@ from datetime import datetime
 from pathlib import Path
 
 # Import PySide6 components
-from PySide6.QtWidgets import (
+from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QDateTimeEdit, QFrame, 
     QGroupBox, QGridLayout, QMessageBox, QFileDialog
 )
-from PySide6.QtCore import Qt, QDateTime, QThread, Signal
-from PySide6.QtGui import QFont
+from PyQt6.QtCore import Qt, QDateTime, QThread, pyqtSignal
+from PyQt6.QtGui import QFont
 
-# Plotting imports - handle compatibility
-MATLOTPLIB_AVAILABLE = False
-try:
-    import matplotlib
-    matplotlib.use('Qt5Agg')  # Set backend before importing pyplot
-    from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-    from matplotlib.figure import Figure
-    MATPLOTLIB_AVAILABLE = True
-except (ImportError, Exception) as e:
-    print(f"Warning: Matplotlib not available. {str(e)}")
+import matplotlib
+matplotlib.use('Qt5Agg')  # Set backend before importing pyplot
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+
 
 from data_viz_plot import main as plot_data_summary
 from data_viz_plot import DATALAKE, STUDY_IDS
@@ -41,7 +36,6 @@ class DataProcessor:
         self.data_root_path = Path(data_root_path)        
     
     def process_lfp_upload(self, patient_id, visit_start, visit_end):
-        """Upload LFP data - IMPLEMENT YOUR LOGIC HERE"""
         try:
             # Prompt user to select all LFP files, move to parser-ready directoy,
             lfp_dir = QFileDialog.getExistingDirectory(
@@ -63,7 +57,6 @@ class DataProcessor:
             raise Exception(f"LFP upload failed: {str(e)}")
     
     def process_audio_video_upload(self, patient_id, visit_start, visit_end):
-        """Upload audio/video data - IMPLEMENT YOUR LOGIC HERE"""
         try:
             # Run A/V source parser
             result = subprocess.run(["/home/nbusleep/BCM/CODE/scripts/run_av_parser.sh"], capture_output=True, text=True)
@@ -77,7 +70,6 @@ class DataProcessor:
             raise Exception(f"Audio/Video upload failed: {str(e)}")
     
     def process_cgx_upload(self, patient_id, visit_start, visit_end):
-        """Upload CGX data - IMPLEMENT YOUR LOGIC HERE"""
         try:
             # Prompt user to select CGX drive, move to parser-ready directory
             cgx_dir = QFileDialog.getExistingDirectory(
@@ -103,8 +95,8 @@ class DataProcessor:
 
 class UploadWorker(QThread):
     """Worker thread for handling data uploads"""
-    finished = Signal(str, bool, dict)
-    progress = Signal(str)
+    finished = pyqtSignal(str, bool, dict)
+    progress = pyqtSignal(str)
     
     def __init__(self, data_type, patient_id, visit_start, visit_end, processor):
         super().__init__()
@@ -154,7 +146,7 @@ class VisualizationWidget(QWidget):
     def init_ui(self):
         layout = QVBoxLayout()
         
-        if MATPLOTLIB_AVAILABLE:
+        try:
             self.figure = Figure(figsize=(10, 7))
             self.canvas = FigureCanvas(self.figure)
             layout.addWidget(self.canvas)
@@ -162,7 +154,7 @@ class VisualizationWidget(QWidget):
             self.ax = self.figure.add_subplot(111)
             self.ax.set_title('Data Visualization', fontsize=12, fontweight='bold')
             self.canvas.draw()
-        else:
+        except:
             label = QLabel("Matplotlib not installed.\nInstall with: pip install matplotlib")
             label.setAlignment(Qt.AlignCenter)
             label.setStyleSheet("color: #666; font-size: 14px;")
@@ -181,8 +173,8 @@ class VisualizationWidget(QWidget):
         self.figure.tight_layout()
         self.canvas.draw()
 
-        # Lab worlds folder
-        self.figure.savefig(Path('/mnt/projectworlds') / STUDY_IDS[upload_worker.patient_id[:-3]] / upload_worker.patient_id / 'NBU_visits' / f'{upload_worker.patient_id}_{upload_worker.visit_start}_visit_plot.pdf', bbox_inches='tight')
+        # Lab worlds folder TODO: Uncomment later
+        #self.figure.savefig(Path('/mnt/projectworlds') / STUDY_IDS[upload_worker.patient_id[:-3]] / upload_worker.patient_id / 'NBU_visits' / f'{upload_worker.patient_id}_{upload_worker.visit_start}_visit_plot.pdf', bbox_inches='tight')
 
 
 # ============================================================================
@@ -244,7 +236,7 @@ class PatientDataUploadApp(QMainWindow):
         layout = QVBoxLayout(header)
         
         title = QLabel('NBU Data Upload Interface')
-        title.setFont(QFont('Arial', 16, QFont.Bold))
+        title.setFont(QFont('Arial', 16, QFont.bold))
         title.setStyleSheet("color: #1E293B;")
         
         subtitle = QLabel('Upload NBU data streams to Datalake')
@@ -259,7 +251,7 @@ class PatientDataUploadApp(QMainWindow):
     def create_patient_info_section(self):
         """Create patient info section"""
         group = QGroupBox('Patient Information')
-        group.setFont(QFont('Arial', 12, QFont.Bold))
+        group.setFont(QFont('Arial', 12, QFont.bold))
         group.setStyleSheet("""
             QGroupBox {
                 background-color: white;
@@ -313,7 +305,7 @@ class PatientDataUploadApp(QMainWindow):
     def create_upload_section(self):
         """Create upload buttons section"""
         group = QGroupBox('Data Stream Upload')
-        group.setFont(QFont('Arial', 12, QFont.Bold))
+        group.setFont(QFont('Arial', 12, QFont.bold))
         group.setStyleSheet("""
             QGroupBox {
                 background-color: white;
@@ -355,7 +347,7 @@ class PatientDataUploadApp(QMainWindow):
     def create_visualization_section(self):
         """Create visualization section"""
         group = QGroupBox('Data Visualization')
-        group.setFont(QFont('Arial', 12, QFont.Bold))
+        group.setFont(QFont('Arial', 12, QFont.bold))
         group.setStyleSheet("""
             QGroupBox {
                 background-color: white;
