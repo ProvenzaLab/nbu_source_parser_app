@@ -216,6 +216,8 @@ class PatientDataUploadApp(QMainWindow):
         main_layout.addWidget(self.create_patient_info_section())
         main_layout.addWidget(self.create_upload_section())
         main_layout.addWidget(self.create_visualization_section(), stretch=1)
+        # Footer with application controls
+        main_layout.addWidget(self.create_footer())
         
         self.statusBar().showMessage('Ready')
     
@@ -386,6 +388,29 @@ class PatientDataUploadApp(QMainWindow):
         
         group.setLayout(layout)
         return group
+
+    def create_footer(self):
+        """Create footer with close button"""
+        footer = QFrame()
+        footer.setStyleSheet("""
+            QFrame { background-color: transparent; }
+        """)
+
+        layout = QHBoxLayout(footer)
+        layout.addStretch()
+
+        close_btn = QPushButton('Close Application')
+        close_btn.setMinimumHeight(40)
+        close_btn.setMaximumWidth(220)
+        close_btn.setFont(QFont('Arial', 10, QFont.Weight.Bold))
+        close_btn.setStyleSheet("""
+            QPushButton { background-color: #EF4444; color: white; border-radius: 8px; padding: 8px; }
+            QPushButton:hover { background-color: #DC2626; }
+        """)
+        close_btn.clicked.connect(self.close)
+
+        layout.addWidget(close_btn)
+        return footer
     
     def update_button_style(self, button, status):
         """Update button appearance"""
@@ -462,6 +487,37 @@ class PatientDataUploadApp(QMainWindow):
             }
             QLineEdit:focus, QDateTimeEdit:focus { border: 2px solid #3B82F6; }
         """)
+
+    def closeEvent(self, event):
+        """Handle application close: attempt graceful shutdown of worker threads."""
+        running_workers = [w for w in self.workers.values() if hasattr(w, 'isRunning') and w.isRunning()]
+        if running_workers:
+            reply = QMessageBox.question(
+                self,
+                'Confirm Exit',
+                'There are uploads in progress. Do you want to stop them and exit?',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+
+            self.statusBar().showMessage('Stopping uploads...')
+            for w in running_workers:
+                try:
+                    w.requestInterruption()
+                except Exception:
+                    pass
+
+            # Wait briefly for threads to finish
+            for w in running_workers:
+                try:
+                    w.wait(3000)
+                except Exception:
+                    pass
+
+        event.accept()
 
 
 def main():
