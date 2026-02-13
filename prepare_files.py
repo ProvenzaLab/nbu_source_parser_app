@@ -1,11 +1,56 @@
+import paramiko
 import os
 import pypdf
 import shutil
 import json
 from pathlib import Path
 from data_viz_plot import STUDY_IDS
+from config import SSH_INFO
 
 ROOT = Path('/home/nbusleep/data') 
+
+def save_object_remote(target_folder, obj, obj_type='figure', ssh_info=SSH_INFO, filename=None):
+    """
+    Save an object to a remote folder using SSH.
+    - target_folder: remote folder path (str)
+    - obj: object to save (e.g., matplotlib figure)
+    - obj_type: type of object ('figure', can expand for others)
+    - ssh_info: dict with SSH connection info {host, port, username, password or key_filename}
+    - filename: name for the saved file (optional)
+    """
+    if ssh_info is None:
+        raise ValueError("ssh_info must be provided with host, port, username, and password or key_filename.")
+
+    # Connect to SSH
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    if 'password' in ssh_info:
+        ssh.connect(ssh_info['host'], username=ssh_info['username'], password=ssh_info['password'])
+    else:
+        ssh.connect(ssh_info['host'], username=ssh_info['username'], key_filename=ssh_info['key_filename'])
+
+    sftp = ssh.open_sftp()
+    try:
+        # Create remote folder if it doesn't exist
+        try:
+            sftp.stat(target_folder)
+        except FileNotFoundError:
+            sftp.mkdir(target_folder)
+
+        # Save object
+        if obj_type == 'figure':
+            if filename is None:
+                filename = 'figure.pdf'
+            local_tmp = os.path.join(os.getcwd(), filename)
+            obj.savefig(local_tmp, bbox_inches='tight')
+            remote_path = os.path.join(target_folder, filename)
+            sftp.put(local_tmp, remote_path)
+            os.remove(local_tmp)
+        else:
+            raise NotImplementedError(f"Saving object type '{obj_type}' not implemented.")
+    finally:
+        sftp.close()
+        ssh.close()
 
 def sort_lfp(json_files, pdf_files, pt):
     study_id = STUDY_IDS[pt[:-3]]
