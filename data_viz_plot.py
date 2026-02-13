@@ -130,8 +130,8 @@ def find_continuous_segments(times, max_gap=1.0):
 def read_lfp_data(pt, visit_start, visit_end):
     study_id = STUDY_IDS[pt[:-3]]
     # Lab worlds folder
-    target_folder = Path('/mnt/projectworlds') / study_id / pt / 'NBU' / 'compiled_LFP'
-    os.makedirs(target_folder, exist_ok=True)
+    #target_folder = Path('/mnt/projectworlds') / study_id / pt / 'NBU' / 'compiled_LFP'
+    #os.makedirs(target_folder, exist_ok=True)
 
     # Gather all LFP files that were 'uploaded' (modified) after the visit start
     lfp_path = DATALAKE / study_id / pt / 'LFP'
@@ -185,7 +185,7 @@ def read_lfp_data(pt, visit_start, visit_end):
     # Convert timestamps to Central + create times column
     pt_df['times'] = pt_df.index.to_series().dt.tz_localize('UTC').dt.tz_convert('America/Chicago')
 
-    pt_df.to_pickle(target_folder / f'{visit_start.strftime("%Y-%m-%d_%H-%M-%S")}-{visit_end.strftime("%Y-%m-%d_%H-%M-%S")}_visit_timedomain.pkl')
+    #pt_df.to_pickle(target_folder / f'{visit_start.strftime("%Y-%m-%d_%H-%M-%S")}-{visit_end.strftime("%Y-%m-%d_%H-%M-%S")}_visit_timedomain.pkl')
     return pt_df
 
 
@@ -195,168 +195,181 @@ def main(pt, visit_start, visit_end, ax):
     
     try:
         logger_files = get_files_from_folder(pt, visit_start, visit_end, 'logger')
+        plot_logger = True
     except FileNotFoundError:
         print(f'No logger data uploaded to Elias for {pt}, {visit_start} visit')
-
+        plot_logger = False
     try:
         oura_sleep_files = get_files_from_folder(pt, visit_start, visit_end, 'oura_sleep')
         oura_met_files = get_files_from_folder(pt, visit_start, visit_end, 'oura_activity')
+        plot_oura = True
     except FileNotFoundError:
         print(f'No Oura data on Elias for {pt} between {visit_start} and {visit_end}')
-
+        plot_oura = False
     try:
         cgx_files = get_files_from_folder(pt, visit_start, visit_end, 'cgx')
+        plot_cgx = True
     except FileNotFoundError:
         print(f'No CGX data uploaded to Elias for {pt} on {visit_start} visit')
-
+        plot_cgx = False
     try:
         lfp_df = read_lfp_data(pt, visit_start, visit_end)
+        plot_lfp = True
     except Exception as e:
         print(f'Error retrieving LFP data for {pt} on {visit_start} visit: {e}')
-        return ax
+        plot_lfp = False
     if lfp_df is None:
-        return ax
+        plot_lfp = False
     
-    lfp_df.dropna(subset=lfp_df.columns.difference(['filename', 'times']), how='all', inplace=True)
-    lfp_df.sort_values(by='times', inplace=True)
+    # LFP Plotting
+    if plot_lfp:
+        lfp_df.dropna(subset=lfp_df.columns.difference(['filename', 'times']), how='all', inplace=True)
+        lfp_df.sort_values(by='times', inplace=True)
 
-    # Plot each continuous segment of TimeDomain data
-    segments = find_continuous_segments(lfp_df.times.values)
+        # Plot each continuous segment of TimeDomain data
+        segments = find_continuous_segments(lfp_df.times.values)
 
-    for start_idx, end_idx in segments:
-        start = lfp_df.times.values[start_idx]
-        end = lfp_df.times.values[end_idx - 1]
-        color = [random.random() for _ in range(3)]
+        for start_idx, end_idx in segments:
+            start = lfp_df.times.values[start_idx]
+            end = lfp_df.times.values[end_idx - 1]
+            color = [random.random() for _ in range(3)]
 
-        ax.axvspan(start, end, ymin=0.2, ymax=0.4, alpha=0.3, color=color)
-    
-    # Add filenames to plot
-    fn_handles = []
-    fn_patches = []
-    for filename, group in lfp_df.groupby('filename'):
-        start = group.times.values[0]
-        end = group.times.values[-1]
-        label = f'{filename.split(os.sep)[-2]}/{filename.split(os.sep)[-1]}'
-        color = [random.random() for _ in range(3)]
-
-        y = 0.1
-
-        ann = ax.annotate(
-            '',
-            xy=(end, y),          
-            xytext=(start, y),    
-            arrowprops=dict(
-                arrowstyle="|-|",      
-                color=color,
-                lw=2,                 
-            )
-        )
-
-        fn_handles.append(label)
-        fn_patches.append(mpatches.Patch(color=color))
-
-    # Add and label logger events to the plot
-    log_handles = []
-    log_labels = []
-    log_colors = {}
-    col_idx = 0
-
-    for logger_fp in logger_files:
-        log_df = pd.read_csv(logger_fp)
-        for j, log_row in log_df.iterrows():
-            if log_row['Notes'] == 'ABORTED':
-                continue
-
-            try:
-                log_start = datetime.strptime(f"{log_row['Start Date']} {log_row['Start Time']}".strip(), '%Y-%m-%d %H:%M:%S').replace(tzinfo=TZ)
-                log_end = datetime.strptime(f"{log_row['End Date']} {log_row['End Time']}".strip(), '%Y-%m-%d %H:%M:%S').replace(tzinfo=TZ)
-                if log_end < log_start or log_start < visit_start or visit_end < log_start:
-                    continue   
-
-                label = f"{log_start.strftime('%I:%M %p')} - {log_end.strftime('%I:%M %p')}: {log_row['Event']}"
-                if log_row['Event'] not in log_colors:
-                    log_colors[log_row['Event']] = LOGGER_COLORS[col_idx]
-                    color = LOGGER_COLORS[col_idx]
-                    col_idx += 1
-                else:
-                    color = log_colors[log_row['Event']]
-
-                ax.axvspan(log_start, log_end, ymin=0.7, ymax=0.8, color=color, label=label, zorder=5)
-                
-                log_handles.append(mpatches.Patch(color=color))
-                log_labels.append(label)
-            except:
-                pass
-            
-    # Add oura sleep events
-    for oura_fp in oura_sleep_files:
-        with open(oura_fp, 'r') as f:
-            raw = json.load(f)
+            ax.axvspan(start, end, ymin=0.2, ymax=0.4, alpha=0.3, color=color)
         
-        for block in raw:
-            sleep_start = datetime.strptime(block['bedtime_start'], '%Y-%m-%dT%H:%M:%S%z')
-            sleep_end = datetime.strptime(block['bedtime_end'], '%Y-%m-%dT%H:%M:%S%z')
-            type = block['type']
+        # Add filenames to plot
+        fn_handles = []
+        fn_patches = []
+        for filename, group in lfp_df.groupby('filename'):
+            start = group.times.values[0]
+            end = group.times.values[-1]
+            label = f'{filename.split(os.sep)[-2]}/{filename.split(os.sep)[-1]}'
+            color = [random.random() for _ in range(3)]
 
-            if visit_start < sleep_start and sleep_end < visit_end:
-                ax.axvspan(sleep_start, sleep_end, ymin=0.85, ymax=0.87, color='lightblue', zorder=5)
-                ax.text(sleep_start, 0.88, f'{type}', zorder=5, fontsize=8, va='bottom', ha='left')
+            y = 0.1
 
-    # Add oura met data
-    met_inset = ax.inset_axes([0, 0.5, 1, 0.1])
-    for oura_fp in oura_met_files:
-        with open(oura_fp, 'r') as f:
-            raw = json.load(f)
+            ann = ax.annotate(
+                '',
+                xy=(end, y),          
+                xytext=(start, y),    
+                arrowprops=dict(
+                    arrowstyle="|-|",      
+                    color=color,
+                    lw=2,                 
+                )
+            )
 
-            for block in raw:
+            fn_handles.append(label)
+            fn_patches.append(mpatches.Patch(color=color))
 
-                # MET metadata
-                met_info = block.get("met", {})
-                if not met_info:
+        # Add and label logger events to the plot
+        log_handles = []
+        log_labels = []
+        log_colors = {}
+        col_idx = 0
+
+    # Logger Plotting
+    if plot_logger:
+        for logger_fp in logger_files:
+            log_df = pd.read_csv(logger_fp)
+            for j, log_row in log_df.iterrows():
+                if log_row['Notes'] == 'ABORTED':
                     continue
 
-                met_start = datetime.strptime(
-                    met_info["timestamp"], "%Y-%m-%dT%H:%M:%S.%f%z"
-                )
+                try:
+                    log_start = datetime.strptime(f"{log_row['Start Date']} {log_row['Start Time']}".strip(), '%Y-%m-%d %H:%M:%S').replace(tzinfo=TZ)
+                    log_end = datetime.strptime(f"{log_row['End Date']} {log_row['End Time']}".strip(), '%Y-%m-%d %H:%M:%S').replace(tzinfo=TZ)
+                    if log_end < log_start or log_start < visit_start or visit_end < log_start:
+                        continue   
 
-                interval_sec = int(met_info.get("interval", 60))
-                met_values = met_info.get("items", [])
+                    label = f"{log_start.strftime('%I:%M %p')} - {log_end.strftime('%I:%M %p')}: {log_row['Event']}"
+                    if log_row['Event'] not in log_colors:
+                        log_colors[log_row['Event']] = LOGGER_COLORS[col_idx]
+                        color = LOGGER_COLORS[col_idx]
+                        col_idx += 1
+                    else:
+                        color = log_colors[log_row['Event']]
 
-                # Build timestamps for each MET value
-                met_times = [
-                    met_start + timedelta(seconds=i * interval_sec)
-                    for i in range(len(met_values))
-                ]
+                    ax.axvspan(log_start, log_end, ymin=0.7, ymax=0.8, color=color, label=label, zorder=5)
+                    
+                    log_handles.append(mpatches.Patch(color=color))
+                    log_labels.append(label)
+                except:
+                    pass
+            
+    # Oura plotting
+    if plot_oura:
+        for oura_fp in oura_sleep_files:
+            with open(oura_fp, 'r') as f:
+                raw = json.load(f)
+            
+            for block in raw:
+                sleep_start = datetime.strptime(block['bedtime_start'], '%Y-%m-%dT%H:%M:%S%z')
+                sleep_end = datetime.strptime(block['bedtime_end'], '%Y-%m-%dT%H:%M:%S%z')
+                type = block['type']
 
-                # Filter to visit window
-                met_times_visit = []
-                met_vals_visit = []
+                if visit_start < sleep_start and sleep_end < visit_end:
+                    ax.axvspan(sleep_start, sleep_end, ymin=0.85, ymax=0.87, color='lightblue', zorder=5)
+                    ax.text(sleep_start, 0.88, f'{type}', zorder=5, fontsize=8, va='bottom', ha='left')
 
-                for t, val in zip(met_times, met_values):
-                    if visit_start <= t <= visit_end and val > 0.9:
-                        met_times_visit.append(t)
-                        met_vals_visit.append(val)
+        # Add oura met data
+        met_inset = ax.inset_axes([0, 0.5, 1, 0.1])
+        for oura_fp in oura_met_files:
+            with open(oura_fp, 'r') as f:
+                raw = json.load(f)
 
-                # Plot metabolic activity as points
-                if met_times_visit:
-                    met_inset.plot(
-                        met_times_visit,
-                        met_vals_visit,
-                        linewidth=0.4,
-                        alpha=0.6,
-                        color='blue',
-                        zorder=5,
-                        label="Oura MET activity"
+                for block in raw:
+
+                    # MET metadata
+                    met_info = block.get("met", {})
+                    if not met_info:
+                        continue
+
+                    met_start = datetime.strptime(
+                        met_info["timestamp"], "%Y-%m-%dT%H:%M:%S.%f%z"
                     )
 
-    met_inset.spines['top'].set_visible(False)
-    met_inset.spines['bottom'].set_visible(False)
-    met_inset.set_xticks([])
-    met_inset.set_yticks([])
+                    interval_sec = int(met_info.get("interval", 60))
+                    met_values = met_info.get("items", [])
+
+                    # Build timestamps for each MET value
+                    met_times = [
+                        met_start + timedelta(seconds=i * interval_sec)
+                        for i in range(len(met_values))
+                    ]
+
+                    # Filter to visit window
+                    met_times_visit = []
+                    met_vals_visit = []
+
+                    for t, val in zip(met_times, met_values):
+                        if visit_start <= t <= visit_end and val > 0.9:
+                            met_times_visit.append(t)
+                            met_vals_visit.append(val)
+
+                    # Plot metabolic activity as points
+                    if met_times_visit:
+                        met_inset.plot(
+                            met_times_visit,
+                            met_vals_visit,
+                            linewidth=0.4,
+                            alpha=0.6,
+                            color='blue',
+                            zorder=5,
+                            label="Oura MET activity"
+                        )
+
+        met_inset.spines['top'].set_visible(False)
+        met_inset.spines['bottom'].set_visible(False)
+        met_inset.set_xticks([])
+        met_inset.set_yticks([])
     
     # Add Apple watch data availability (only TRBD pts)
     if pt[:-3] == 'TRBD':
-        watch_files = get_files_from_folder(pt, visit_start, visit_end, 'apple')
+        try:
+            watch_files = get_files_from_folder(pt, visit_start, visit_end, 'apple')
+        except FileNotFoundError:
+            print(f'No Apple Watch data uploaded to Elias for {pt} on {visit_start} visit')
+            watch_files = []
 
         aw_inset = ax.inset_axes([0, 0.6, 1, 0.1])
         for watch_fp in watch_files:
@@ -384,22 +397,26 @@ def main(pt, visit_start, visit_end, ax):
         aw_inset.set_xticks([])
         aw_inset.set_yticks([])
 
-    # Add cgx data recording length
-    for cgx_fp in cgx_files:
-        start_date = cgx_fp.split(os.sep)[-3]
-        cgx_start, cgx_end = get_cgx_times(cgx_fp)
-       
-        label = f'CGX sleep starting {start_date}'
-        ax.axvspan(cgx_start, cgx_end, ymin=0.93, ymax=0.95, color='purple', zorder=5)
+    # CGX Plotting
+    if plot_cgx:
+        for cgx_fp in cgx_files:
+            start_date = cgx_fp.split(os.sep)[-3]
+            cgx_start, cgx_end = get_cgx_times(cgx_fp)
+        
+            label = f'CGX sleep starting {start_date}'
+            ax.axvspan(cgx_start, cgx_end, ymin=0.93, ymax=0.95, color='purple', zorder=5)
+    
+    ########################
+    # Plot formatting      #
+    ########################
 
+    # Iterate through each day in the range
     # Add vertical dotted lines for each day
     current_day = visit_start.replace(hour=0, minute=0, second=0, microsecond=0)
-    
+        
     # Add label for the starting day at the start of the plot
     ax.text(visit_start + pd.Timedelta(minutes=10), ax.get_ylim()[1] - 0.01, visit_start.strftime('%b %d'), 
             rotation=0, fontsize=9, ha='left', va='top', weight='bold')
-    
-    # Iterate through each day in the range
     while current_day <= visit_end:
         next_day = current_day + pd.Timedelta(days=1)
         
@@ -410,7 +427,6 @@ def main(pt, visit_start, visit_end, ax):
         
         current_day = next_day
     
-    # Plot formatting
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%I:%M %p', tz=TZ))
     ax.set_xlabel("Time (Hour:Minute)")
     ax.set_ylabel(" ")
@@ -420,8 +436,10 @@ def main(pt, visit_start, visit_end, ax):
     ax.set_xlim(visit_start, visit_end)
 
     # Create separate legends for files and logger events
-    file_legend = ax.legend(handles=fn_patches, labels=fn_handles, loc='center left', bbox_to_anchor=(1, 0.25), title='File Names', fontsize="small")
-    ax.add_artist(file_legend)
-    ax.legend(handles=log_handles, labels=log_labels, loc='center left', bbox_to_anchor=(1, 0.75), title="Logger Events", fontsize="small")
+    if plot_logger:
+        file_legend = ax.legend(handles=fn_patches, labels=fn_handles, loc='center left', bbox_to_anchor=(1, 0.25), title='File Names', fontsize="small")
+        ax.add_artist(file_legend)
+    if plot_lfp:
+        ax.legend(handles=log_handles, labels=log_labels, loc='center left', bbox_to_anchor=(1, 0.75), title="Logger Events", fontsize="small")
 
     return ax
