@@ -436,10 +436,10 @@ def main(pt, visit_start, visit_end, ax):
     ax.set_xlim(visit_start, visit_end)
 
     # Create separate legends for files and logger events
-    if plot_logger:
+    if plot_lfp:
         file_legend = ax.legend(handles=fn_patches, labels=fn_handles, loc='center left', bbox_to_anchor=(1, 0.25), title='File Names', fontsize="small")
         ax.add_artist(file_legend)
-    if plot_lfp:
+    if plot_logger:
         ax.legend(handles=log_handles, labels=log_labels, loc='center left', bbox_to_anchor=(1, 0.75), title="Logger Events", fontsize="small")
 
     return ax

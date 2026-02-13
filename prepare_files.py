@@ -35,7 +35,8 @@ def save_object_remote(target_folder, obj, obj_type='figure', ssh_info=SSH_INFO,
         try:
             sftp.stat(target_folder)
         except FileNotFoundError:
-            sftp.mkdir(target_folder)
+            cmd = f'mkdir -p {target_folder}'
+            ssh.exec_command(cmd)
 
         # Save object
         if obj_type == 'figure':
@@ -51,6 +52,7 @@ def save_object_remote(target_folder, obj, obj_type='figure', ssh_info=SSH_INFO,
     finally:
         sftp.close()
         ssh.close()
+    return
 
 def sort_lfp(json_files, pdf_files, pt):
     study_id = STUDY_IDS[pt[:-3]]
