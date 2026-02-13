@@ -21,7 +21,7 @@ from matplotlib.figure import Figure
 
 
 from data_viz_plot import main as plot_data_summary
-from data_viz_plot import DATALAKE, STUDY_IDS
+from data_viz_plot import DATALAKE, STUDY_IDS, ROOT
 
 from prepare_files import sort_lfp, sort_cgx
 
@@ -38,8 +38,7 @@ class DataProcessor:
     def process_lfp_upload(self, patient_id, visit_start, visit_end):
         try:
             # Prompt user to select all LFP files, move to parser-ready directoy,
-            lfp_dir = QFileDialog.getExistingDirectory(
-                        None, "Select tablet Documents folder containing downloaded JSONs & PDFs")
+            lfp_dir = ROOT / 'LFP_DATA'
 
             json_files = glob.glob(f'{lfp_dir}/*.json')
             pdf_files = glob.glob(f'{lfp_dir}/*.pdf')
@@ -72,8 +71,7 @@ class DataProcessor:
     def process_cgx_upload(self, patient_id, visit_start, visit_end):
         try:
             # Prompt user to select CGX drive, move to parser-ready directory
-            cgx_dir = QFileDialog.getExistingDirectory(
-                        None, "Select CGX SD card drive")
+            cgx_dir = ROOT / 'CGX_DATA'
             cgx_files = glob.glob(f'{cgx_dir}/*.cgx')
             sort_cgx(cgx_files, patient_id)
 
