@@ -170,8 +170,10 @@ class VisualizationWidget(QWidget):
         self.figure.tight_layout()
         self.canvas.draw()
 
-        # Lab worlds folder TODO: Uncomment later
-        #self.figure.savefig(Path('/mnt/projectworlds') / STUDY_IDS[upload_worker.patient_id[:-3]] / upload_worker.patient_id / 'NBU_visits' / f'{upload_worker.patient_id}_{upload_worker.visit_start}_visit_plot.pdf', bbox_inches='tight')
+        # Lab worlds folder
+        target_folder = Path('/mnt/projectworlds') / STUDY_IDS[upload_worker.patient_id[:-3]] / upload_worker.patient_id / 'NBU' / 'plots'
+        os.makedirs(target_folder, exist_ok=True)
+        self.figure.savefig(target_folder / f'{upload_worker.visit_start}-{upload_worker.visit_end}_visit.pdf', bbox_inches='tight')
 
 
 # ============================================================================

@@ -127,10 +127,10 @@ def find_continuous_segments(times, max_gap=1.0):
     
     return segments
 
-def read_lfp_data(pt, visit_start):
+def read_lfp_data(pt, visit_start, visit_end):
     study_id = STUDY_IDS[pt[:-3]]
     # Lab worlds folder
-    target_folder = Path('/mnt/projectworlds') / study_id / pt / 'NBU_visits'
+    target_folder = Path('/mnt/projectworlds') / study_id / pt / 'NBU' / 'compiled_LFP'
     os.makedirs(target_folder, exist_ok=True)
 
     # Gather all LFP files that were 'uploaded' (modified) after the visit start
@@ -185,7 +185,7 @@ def read_lfp_data(pt, visit_start):
     # Convert timestamps to Central + create times column
     pt_df['times'] = pt_df.index.to_series().dt.tz_localize('UTC').dt.tz_convert('America/Chicago')
 
-    pt_df.to_pickle(target_folder / f'{visit_start.strftime("%Y-%m-%d_%H-%M-%S")}_visit_timedomain.pkl')
+    pt_df.to_pickle(target_folder / f'{visit_start.strftime("%Y-%m-%d_%H-%M-%S")}-{visit_end.strftime("%Y-%m-%d_%H-%M-%S")}_visit_timedomain.pkl')
     return pt_df
 
 
@@ -210,7 +210,7 @@ def main(pt, visit_start, visit_end, ax):
         print(f'No CGX data uploaded to Elias for {pt} on {visit_start} visit')
 
     try:
-        lfp_df = read_lfp_data(pt, visit_start)
+        lfp_df = read_lfp_data(pt, visit_start, visit_end)
     except Exception as e:
         print(f'Error retrieving LFP data for {pt} on {visit_start} visit: {e}')
         return ax
