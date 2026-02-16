@@ -2,3 +2,5 @@ __pycache__/
 nbu_parser_app/
 .vscode/
 config.py
+build/
+dist/
