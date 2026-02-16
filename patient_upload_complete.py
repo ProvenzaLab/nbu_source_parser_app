@@ -9,7 +9,7 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QDateTimeEdit, QFrame, 
-    QGroupBox, QGridLayout, QMessageBox, QFileDialog
+    QGroupBox, QGridLayout, QMessageBox
 )
 from PyQt6.QtCore import Qt, QDateTime, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -17,13 +17,12 @@ from PyQt6.QtGui import QFont
 import matplotlib
 matplotlib.use('Qt5Agg')  # Set backend before importing pyplot
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
+import matplotlib.pyplot as plt
 
 
 from data_viz_plot import main as plot_data_summary
-from data_viz_plot import DATALAKE, STUDY_IDS, ROOT
-
 from prepare_files import sort_lfp, sort_cgx, save_object_remote
+from config import STUDY_IDS, DATALAKE, ROOT
 
 # ============================================================================
 # DATA PROCESSOR
@@ -45,12 +44,12 @@ class DataProcessor:
             sort_lfp(json_files, pdf_files, patient_id)
 
             # Run LFP source parser
-            result = subprocess.run(["/home/nbusleep/BCM/CODE/scripts/run_lfp_parser.sh"], capture_output=True, text=True)
+            result = subprocess.run(["/home/nbusleep/BCM/CODE/scripts/run_lfp_parser.sh"], text=True)
 
             return {
                 'records_uploaded': len(json_files) + len(pdf_files),
                 'timestamp': datetime.now().isoformat(),
-                'status': f'{result.returncode}'
+                'status': f'{result}'
             }
         except Exception as e:
             raise Exception(f"LFP upload failed: {str(e)}")
@@ -58,12 +57,12 @@ class DataProcessor:
     def process_audio_video_upload(self, patient_id, visit_start, visit_end):
         try:
             # Run A/V source parser
-            result = subprocess.run(["/home/nbusleep/BCM/CODE/scripts/run_av_parser.sh"], capture_output=True, text=True)
+            result = subprocess.run(["/home/nbusleep/BCM/CODE/scripts/run_av_parser.sh"], text=True)
 
             return {
                 'files_uploaded': 0, # Change this to read file log
                 'timestamp': datetime.now().isoformat(),
-                'status': f'{result.returncode}'
+                'status': f'{result}'
             }
         except Exception as e:
             raise Exception(f"Audio/Video upload failed: {str(e)}")
@@ -76,12 +75,12 @@ class DataProcessor:
             sort_cgx(cgx_files, patient_id)
 
             #  Run CGX source parser
-            result = subprocess.run(["/home/nbusleep/BCM/CODE/scripts/run_cgx_parser.sh"], capture_output=True, text=True)
+            result = subprocess.run(["/home/nbusleep/BCM/CODE/scripts/run_cgx_parser.sh"], text=True)
 
             return {
                 'records_uploaded': len(cgx_files),
                 'timestamp': datetime.now().isoformat(),
-                'status': f'{result.returncode}'
+                'status': f'{result}'
             }
         except Exception as e:
             raise Exception(f"CGX upload failed: {str(e)}")
@@ -145,11 +144,10 @@ class VisualizationWidget(QWidget):
         layout = QVBoxLayout()
         
         try:
-            self.figure = Figure(figsize=(10, 7))
+            self.figure, self.ax = plt.subplots(figsize=(15, 8), constrained_layout=True)
             self.canvas = FigureCanvas(self.figure)
             layout.addWidget(self.canvas)
             
-            self.ax = self.figure.add_subplot(111)
             self.ax.set_title('Data Visualization', fontsize=12, fontweight='bold')
             self.canvas.draw()
         except:

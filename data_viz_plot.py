@@ -3,21 +3,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.patches as mpatches
-import matplotlib.colors as mcolors
 import random
 import os
 import glob
 from datetime import datetime, timedelta
 from pathlib import Path
-from zoneinfo import ZoneInfo
 import json
 from percept_parser.percept import PerceptParser
-
-TZ = ZoneInfo("America/Chicago")
-STUDY_IDS = {'AA': 'AA-56119', 'TRBD': 'TRBD-53761', 'P': 'PerceptOCD-48392'}
-LOGGER_COLORS = plt.get_cmap('Set2').colors
-DATALAKE = Path('/mnt/datalake')
-ROOT = Path('/home/nbusleep/data') 
+from config import STUDY_IDS, DATALAKE, TZ, LOGGER_COLORS 
 
 def get_folders_in_range(parent_dir, start_folder_name, end_folder_name):
     """

@@ -4,10 +4,7 @@ import pypdf
 import shutil
 import json
 from pathlib import Path
-from data_viz_plot import STUDY_IDS
-from config import SSH_INFO
-
-ROOT = Path('/home/nbusleep/data') 
+from config import SSH_INFO, ROOT, STUDY_IDS
 
 def save_object_remote(target_folder, obj, obj_type='figure', ssh_info=SSH_INFO, filename=None):
     """
