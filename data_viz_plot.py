@@ -41,7 +41,7 @@ def get_folders_in_range(parent_dir, start_folder_name, end_folder_name):
             
     return folders_in_range
 
-def get_files_from_folder(pt, visit_start, visit_end, modality):
+def get_files_from_folder(pt, visit_start, visit_end, modality, loc=None):
     study_id = STUDY_IDS[pt[:-3]]
     arr = []
 
@@ -49,13 +49,9 @@ def get_files_from_folder(pt, visit_start, visit_end, modality):
         paths = get_folders_in_range(DATALAKE / study_id  / pt / 'NBU', visit_start.strftime('%Y-%m-%d'), visit_end.strftime('%Y-%m-%d'))
         def func(path):   return glob.glob(os.path.join(Path(path) / 'events', "*.csv"))
     
-    elif modality == 'oura_activity':
+    elif modality == 'oura':
         paths = get_folders_in_range(DATALAKE / study_id  / pt / 'oura', visit_start.strftime('%Y-%m-%d'), visit_end.strftime('%Y-%m-%d'))
-        def func(path):   return glob.glob(os.path.join(Path(path), "daily_activity.json"))
-
-    elif modality == 'oura_sleep':
-        paths = get_folders_in_range(DATALAKE / study_id  / pt / 'oura', visit_start.strftime('%Y-%m-%d'), visit_end.strftime('%Y-%m-%d'))
-        def func(path):   return glob.glob(os.path.join(Path(path), "sleep.json"))
+        def func(path):   return glob.glob(os.path.join(Path(path), f"{loc}.json"))
 
     elif modality == 'apple':
         paths = get_folders_in_range(DATALAKE / study_id  / pt / 'rune', visit_start.strftime('%Y-%m-%d'), visit_end.strftime('%Y-%m-%d'))
@@ -63,7 +59,11 @@ def get_files_from_folder(pt, visit_start, visit_end, modality):
 
     elif modality == 'cgx':
         paths = get_folders_in_range(DATALAKE / study_id  / pt / 'NBU', visit_start.strftime('%Y-%m-%d'), visit_end.strftime('%Y-%m-%d'))
-        def func(path):   return glob.glob(os.path.join(Path(path) / 'CGX', "*.cgx"))
+        def func(path):   return glob.glob(os.path.join(Path(path) / 'CGX', "*.edf"))
+
+    elif modality == 'video':
+        paths = get_folders_in_range(DATALAKE / study_id / pt / 'NBU', visit_start.strftime('%Y-%m-%d'), visit_end.strftime('%Y-%m-%d'))
+        def func(path):   return glob.glob(os.path.join(Path(path) / 'video' / loc, "*.json"))
     else:
         return ValueError
     
@@ -193,8 +193,8 @@ def main(pt, visit_start, visit_end, ax):
         print(f'No logger data uploaded to Elias for {pt}, {visit_start} visit')
         plot_logger = False
     try:
-        oura_sleep_files = get_files_from_folder(pt, visit_start, visit_end, 'oura_sleep')
-        oura_met_files = get_files_from_folder(pt, visit_start, visit_end, 'oura_activity')
+        oura_sleep_files = get_files_from_folder(pt, visit_start, visit_end, 'oura', 'sleep')
+        oura_met_files = get_files_from_folder(pt, visit_start, visit_end, 'oura', 'daily_activity')
         plot_oura = True
     except FileNotFoundError:
         print(f'No Oura data on Elias for {pt} between {visit_start} and {visit_end}')
@@ -205,6 +205,13 @@ def main(pt, visit_start, visit_end, ax):
     except FileNotFoundError:
         print(f'No CGX data uploaded to Elias for {pt} on {visit_start} visit')
         plot_cgx = False
+    try:
+        sleep_video_files = get_files_from_folder(pt, visit_start, visit_end, 'video', 'sleep')
+        lounge_video_files = get_files_from_folder(pt, visit_start, visit_end, 'video', 'lounge')
+        plot_video = True
+    except FileNotFoundError:
+        print(f'No video data uploaded to Elias for {pt} on {visit_start} visit')
+        plot_video = False
     try:
         lfp_df = read_lfp_data(pt, visit_start, visit_end)
         plot_lfp = True
@@ -254,11 +261,11 @@ def main(pt, visit_start, visit_end, ax):
             fn_handles.append(label)
             fn_patches.append(mpatches.Patch(color=color))
 
-        # Add and label logger events to the plot
-        log_handles = []
-        log_labels = []
-        log_colors = {}
-        col_idx = 0
+    # Add and label logger events to the plot
+    log_handles = []
+    log_labels = []
+    log_colors = {}
+    col_idx = 0
 
     # Logger Plotting
     if plot_logger:
@@ -288,6 +295,27 @@ def main(pt, visit_start, visit_end, ax):
                     log_labels.append(label)
                 except:
                     pass
+
+    # Video Plotting
+    if plot_video:
+        for i, (video_files, color) in enumerate([(sleep_video_files, '#7fc97f'), (lounge_video_files, '#beaed4')]):
+            times = []
+            for video_fp in video_files:
+                with open(video_fp, 'r') as f:
+                    try:
+                        raw = json.load(f)
+                    except Exception as e:
+                        print(f"Error reading {video_fp} for {pt} on {visit_start.strftime('%Y-%m-%d')}: {e}")
+                        continue
+                times.extend(raw["real_times"])
+            times = pd.to_datetime(times).tz_localize('UTC').tz_convert(TZ)
+            times = times[(times >= visit_start) & (times <= visit_end)]
+            if not times.empty:
+                segments = find_continuous_segments(times.values, max_gap=1) # max gap 1 sec
+                for start_idx, end_idx in segments:
+                    start = times.values[start_idx]
+                    end = times.values[end_idx - 1]
+                    ax.axvspan(start, end, ymin=(0.34 + i * 0.1), ymax=(0.36 + i * 0.1), color=color)
             
     # Oura plotting
     if plot_oura:
@@ -398,7 +426,9 @@ def main(pt, visit_start, visit_end, ax):
         
             label = f'CGX sleep starting {start_date}'
             ax.axvspan(cgx_start, cgx_end, ymin=0.93, ymax=0.95, color='purple', zorder=5)
-    
+            ax.text(cgx_start, 0.955, label, zorder=5, fontsize=8, va='bottom', ha='left')
+
+
     ########################
     # Plot formatting      #
     ########################
@@ -423,8 +453,8 @@ def main(pt, visit_start, visit_end, ax):
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%I:%M %p', tz=TZ))
     ax.set_xlabel("Time (Hour:Minute)")
     ax.set_ylabel(" ")
-    ax.set_yticks([0.1, 0.3, 0.55, 0.65, 0.775, 0.86, 0.94])
-    ax.set_yticklabels(['Files', 'Neural Data', 'MET Data', 'Apple Watch HR', 'Logger Events', 'Oura Sleep', 'CGX Data'])
+    ax.set_yticks([0.05, 0.2, 0.35, 0.45, 0.55, 0.65, 0.775, 0.86, 0.94])
+    ax.set_yticklabels(['Files', 'Neural Data', 'Sleep Room Video', 'Lounge Video', 'MET Data', 'Apple Watch HR', 'Logger Events', 'Oura Sleep', 'CGX Data'])
     ax.set_title(f"{pt} NBU visit {visit_start} to {visit_end}")
     ax.set_xlim(visit_start, visit_end)
 

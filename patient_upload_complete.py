@@ -170,7 +170,6 @@ class VisualizationWidget(QWidget):
         target_folder = f'/mnt/projectworlds/{STUDY_IDS[upload_worker.patient_id[:-3]]}/{upload_worker.patient_id}/NBU/plots'
         save_object_remote(target_folder, self.figure, obj_type='figure', filename=f'{upload_worker.visit_start.split("T")[0]}-{upload_worker.visit_end.split("T")[0]}_visit.pdf')
 
-
 # ============================================================================
 # MAIN APPLICATION
 # ============================================================================
