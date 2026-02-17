@@ -549,7 +549,7 @@ class PatientDataUploadApp(QMainWindow):
         visit_start = self.visit_start_input.dateTime().toString(Qt.DateFormat.ISODate)
         visit_end = self.visit_end_input.dateTime().toString(Qt.DateFormat.ISODate)
         
-        if not self.check_upload(self, patient_id, visit_start, visit_end):
+        if not self.check_upload(patient_id, visit_start, visit_end):
             QMessageBox.warning(self, 'Error', 'Invalid patient ID or visit times. Please check you inputs.')
             return
 
