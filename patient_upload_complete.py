@@ -135,7 +135,7 @@ class UploadWorker(QThread):
 
 class PlotThread(QThread):
     """Thread to run the external plot worker (non-blocking)"""
-    finished = pyqtSignal(str, str)  # png_path, pdf_path
+    finished = pyqtSignal(str, str)  # pickle_path, pdf_path
     progress = pyqtSignal(str)
 
     def __init__(self, pt, visit_start, visit_end, parent=None):
@@ -154,8 +154,9 @@ class PlotThread(QThread):
             safe_end = self.visit_end.replace(':', '-').replace('T', '_')
             png_path = str(tmp / f'plot_{safe_pt}_{safe_start}_{safe_end}.png')
             pdf_path = str(tmp / f'plot_{safe_pt}_{safe_start}_{safe_end}.pdf')
+            pickle_path = str(tmp / f'plot_{safe_pt}_{safe_start}_{safe_end}.pkl')
 
-            cmd = [sys.executable, str(script_path), self.pt, self.visit_start, self.visit_end, png_path, pdf_path]
+            cmd = [sys.executable, str(script_path), self.pt, self.visit_start, self.visit_end, png_path, pdf_path, pickle_path]
             self.progress.emit('Starting background plot process...')
             # Run subprocess (blocks this thread only)
             res = subprocess.run(cmd, capture_output=True, text=True)
@@ -163,7 +164,7 @@ class PlotThread(QThread):
                 self.progress.emit(f'Plot worker failed: {res.stderr or res.stdout}')
                 return
             self.progress.emit('Background plot complete')
-            self.finished.emit(png_path, pdf_path)
+            self.finished.emit(pickle_path, pdf_path)
         except Exception as e:
             self.progress.emit(f'Plot error: {e}')
             return
@@ -221,16 +222,36 @@ class VisualizationWidget(QWidget):
         self.plot_thread.finished.connect(self.on_plot_done)
         self.plot_thread.start()
 
-    def on_plot_done(self, png_path, pdf_path):
-        """Called when background plot completes. Load PNG and upload PDF remotely."""
+    def on_plot_done(self, pickle_path, pdf_path):
+        """Called when background plot completes. Load pickled Figure and upload PDF, then clean temp files."""
         try:
             patient_id, visit_start, visit_end = getattr(self, '_last_plot_info', (None, None, None))
-            if png_path and Path(png_path).exists():
-                pix = QPixmap(png_path)
-                if not pix.isNull():
-                    self.img_label.setPixmap(pix.scaled(self.canvas.width(), self.canvas.height(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
-                    self.img_label.setVisible(True)
-                    self.canvas.setVisible(False)
+
+            # Load pickled figure and embed into UI
+            if pickle_path and Path(pickle_path).exists():
+                try:
+                    import pickle
+                    with open(pickle_path, 'rb') as f:
+                        fig = pickle.load(f)
+
+                    # Remove old canvas widget
+                    try:
+                        self.canvas.setParent(None)
+                    except Exception:
+                        pass
+
+                    # Create new FigureCanvas from the unpickled figure and add to layout
+                    new_canvas = FigureCanvas(fig)
+                    self.canvas = new_canvas
+                    self.layout().addWidget(self.canvas)
+                    try:
+                        self.img_label.setVisible(False)
+                    except Exception:
+                        pass
+                    self.canvas.setVisible(True)
+                    self.canvas.draw()
+                except Exception as e:
+                    print(f'Failed to load figure: {e}')
 
             # Upload the PDF file remotely if possible
             if pdf_path and Path(pdf_path).exists() and patient_id is not None:
@@ -238,8 +259,22 @@ class VisualizationWidget(QWidget):
                 try:
                     save_object_remote(target_folder, str(pdf_path), obj_type='file', filename=f'{visit_start.split("T")[0]}-{visit_end.split("T")[0]}_visit.pdf')
                 except Exception as e:
-                    print(f'Upload plot failed: {e}')
-        except Exception:
+                    try:
+                        win = self.window() or QApplication.instance().activeWindow()
+                        if win and hasattr(win, 'statusBar'):
+                            win.statusBar().showMessage(f'Upload plot failed: {e}')
+                    except Exception:
+                        pass
+
+            # Clean up temp files
+            for p in (pickle_path, pdf_path):
+                try:
+                    if p and Path(p).exists():
+                        os.remove(p)
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f'Error in on_plot_done: {e}')
             pass
 
 # ============================================================================
@@ -490,6 +525,19 @@ class PatientDataUploadApp(QMainWindow):
         }
         button.setStyleSheet(f"QPushButton {{ {styles.get(status, styles[None])} }}")
         button.setEnabled(status != 'uploading')
+
+    def check_upload(self, patient_id, visit_start, visit_end):
+        """Validate upload inputs"""
+        if patient_id[:-3] not in STUDY_IDS:
+            return False
+        try:
+            start = datetime.fromisoformat(visit_start)
+            end =datetime.fromisoformat(visit_end)
+            if start >= end:
+                return False
+        except ValueError:
+            return False
+        return True
     
     def handle_upload(self, data_type):
         """Handle upload"""
@@ -501,6 +549,10 @@ class PatientDataUploadApp(QMainWindow):
         visit_start = self.visit_start_input.dateTime().toString(Qt.DateFormat.ISODate)
         visit_end = self.visit_end_input.dateTime().toString(Qt.DateFormat.ISODate)
         
+        if not self.check_upload(self, patient_id, visit_start, visit_end):
+            QMessageBox.warning(self, 'Error', 'Invalid patient ID or visit times. Please check you inputs.')
+            return
+
         button = self.upload_buttons[data_type]
         self.update_button_style(button, 'uploading')
         button.setText('Uploading...')
