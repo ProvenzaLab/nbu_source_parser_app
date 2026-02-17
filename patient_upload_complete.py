@@ -13,6 +13,10 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QDateTime, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QPixmap
+
+import tempfile
+from pathlib import Path
 
 import matplotlib
 matplotlib.use('Qt5Agg')  # Set backend before importing pyplot
@@ -129,6 +133,42 @@ class UploadWorker(QThread):
             self.finished.emit(self.data_type, False, {'error': str(e)})
 
 
+class PlotThread(QThread):
+    """Thread to run the external plot worker (non-blocking)"""
+    finished = pyqtSignal(str, str)  # png_path, pdf_path
+    progress = pyqtSignal(str)
+
+    def __init__(self, pt, visit_start, visit_end, parent=None):
+        super().__init__(parent)
+        self.pt = pt
+        self.visit_start = visit_start
+        self.visit_end = visit_end
+
+    def run(self):
+        try:
+            script_path = Path(__file__).parent / 'plot_worker.py'
+            safe_pt = self.pt
+            # create temp output paths
+            tmp = Path(tempfile.gettempdir())
+            safe_start = self.visit_start.replace(':', '-').replace('T', '_')
+            safe_end = self.visit_end.replace(':', '-').replace('T', '_')
+            png_path = str(tmp / f'plot_{safe_pt}_{safe_start}_{safe_end}.png')
+            pdf_path = str(tmp / f'plot_{safe_pt}_{safe_start}_{safe_end}.pdf')
+
+            cmd = [sys.executable, str(script_path), self.pt, self.visit_start, self.visit_end, png_path, pdf_path]
+            self.progress.emit('Starting background plot process...')
+            # Run subprocess (blocks this thread only)
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.returncode != 0:
+                self.progress.emit(f'Plot worker failed: {res.stderr or res.stdout}')
+                return
+            self.progress.emit('Background plot complete')
+            self.finished.emit(png_path, pdf_path)
+        except Exception as e:
+            self.progress.emit(f'Plot error: {e}')
+            return
+
+
 # ============================================================================
 # VISUALIZATION WIDGET
 # ============================================================================
@@ -147,6 +187,11 @@ class VisualizationWidget(QWidget):
             self.figure, self.ax = plt.subplots(figsize=(15, 8), constrained_layout=True)
             self.canvas = FigureCanvas(self.figure)
             layout.addWidget(self.canvas)
+            # Image label for showing plots generated in background (PNG)
+            self.img_label = QLabel()
+            self.img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.img_label.setVisible(False)
+            layout.addWidget(self.img_label)
             
             self.ax.set_title('Data Visualization', fontsize=12, fontweight='bold')
             self.canvas.draw()
@@ -161,14 +206,49 @@ class VisualizationWidget(QWidget):
     def update_plot(self, upload_worker):
         """Update visualization with uploaded data"""
         self.ax.clear()
-        
         self.ax = plot_data_summary(upload_worker.patient_id, upload_worker.visit_start, upload_worker.visit_end, self.ax)
         self.figure.tight_layout()
         self.canvas.draw()
 
-        # Lab worlds folder
+        # Lab worlds folder (synchronous PDF save & upload)
         target_folder = f'/mnt/projectworlds/{STUDY_IDS[upload_worker.patient_id[:-3]]}/{upload_worker.patient_id}/NBU/plots'
         save_object_remote(target_folder, self.figure, obj_type='figure', filename=f'{upload_worker.visit_start.split("T")[0]}-{upload_worker.visit_end.split("T")[0]}_visit.pdf')
+
+    def start_background_plot(self, patient_id, visit_start, visit_end):
+        """Start plotting in a background process/thread which produces PNG/PDF outputs."""
+        self._last_plot_info = (patient_id, visit_start, visit_end)
+        self.plot_thread = PlotThread(patient_id, visit_start, visit_end)
+        # Show status messages in app status bar if available
+        try:
+            self.plot_thread.progress.connect(lambda m: QApplication.instance().activeWindow().statusBar().showMessage(m))
+        except Exception:
+            pass
+        self.plot_thread.finished.connect(self.on_plot_done)
+        self.plot_thread.start()
+
+    def on_plot_done(self, png_path, pdf_path):
+        """Called when background plot completes. Load PNG and upload PDF remotely."""
+        try:
+            patient_id, visit_start, visit_end = getattr(self, '_last_plot_info', (None, None, None))
+            if png_path and Path(png_path).exists():
+                pix = QPixmap(png_path)
+                if not pix.isNull():
+                    self.img_label.setPixmap(pix.scaled(self.canvas.width(), self.canvas.height(), Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+                    self.img_label.setVisible(True)
+                    self.canvas.setVisible(False)
+
+            # Upload the PDF file remotely if possible
+            if pdf_path and Path(pdf_path).exists() and patient_id is not None:
+                target_folder = f'/mnt/projectworlds/{STUDY_IDS[patient_id[:-3]]}/{patient_id}/NBU/plots'
+                try:
+                    save_object_remote(target_folder, str(pdf_path), obj_type='file', filename=f'{visit_start.split("T")[0]}-{visit_end.split("T")[0]}_visit.pdf')
+                except Exception as e:
+                    try:
+                        QApplication.instance().activeWindow().statusBar().showMessage(f'Upload plot failed: {e}')
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
 # ============================================================================
 # MAIN APPLICATION
@@ -456,7 +536,9 @@ class PatientDataUploadApp(QMainWindow):
             })
             
             self.summary_label.setText(f'Total uploads: {len(self.uploaded_data)}')
-            self.viz_widget.update_plot(self.workers[data_type])
+            # Start plotting in background to avoid blocking UI
+            w = self.workers[data_type]
+            self.viz_widget.start_background_plot(w.patient_id, w.visit_start, w.visit_end)
             self.statusBar().showMessage(f'{data_type} upload successful', 3000)
         else:
             self.update_button_style(button, 'error')
@@ -468,8 +550,9 @@ class PatientDataUploadApp(QMainWindow):
         if len(self.uploaded_data) == 0:
             QMessageBox.warning(self, 'Error', 'Please upload data to refresh visualization')
             return
-        
-        self.viz_widget.update_plot(self.workers[list(self.workers.keys())[0]])
+        # Refresh using last worker info, run in background
+        first_worker = self.workers[list(self.workers.keys())[0]]
+        self.viz_widget.start_background_plot(first_worker.patient_id, first_worker.visit_start, first_worker.visit_end)
     
     def apply_stylesheet(self):
         """Apply global styles"""

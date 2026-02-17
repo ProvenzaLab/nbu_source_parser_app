@@ -44,6 +44,12 @@ def save_object_remote(target_folder, obj, obj_type='figure', ssh_info=SSH_INFO,
             remote_path = os.path.join(target_folder, filename)
             sftp.put(local_tmp, remote_path)
             os.remove(local_tmp)
+        elif obj_type == 'file':
+            # obj is a local file path to upload
+            if filename is None:
+                filename = os.path.basename(obj)
+            remote_path = os.path.join(target_folder, filename)
+            sftp.put(obj, remote_path)
         else:
             raise NotImplementedError(f"Saving object type '{obj_type}' not implemented.")
     finally:
