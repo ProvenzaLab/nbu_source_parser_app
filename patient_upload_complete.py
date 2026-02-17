@@ -218,11 +218,6 @@ class VisualizationWidget(QWidget):
         """Start plotting in a background process/thread which produces PNG/PDF outputs."""
         self._last_plot_info = (patient_id, visit_start, visit_end)
         self.plot_thread = PlotThread(patient_id, visit_start, visit_end)
-        # Show status messages in app status bar if available
-        try:
-            self.plot_thread.progress.connect(lambda m: QApplication.instance().activeWindow().statusBar().showMessage(m))
-        except Exception:
-            pass
         self.plot_thread.finished.connect(self.on_plot_done)
         self.plot_thread.start()
 
@@ -243,10 +238,7 @@ class VisualizationWidget(QWidget):
                 try:
                     save_object_remote(target_folder, str(pdf_path), obj_type='file', filename=f'{visit_start.split("T")[0]}-{visit_end.split("T")[0]}_visit.pdf')
                 except Exception as e:
-                    try:
-                        QApplication.instance().activeWindow().statusBar().showMessage(f'Upload plot failed: {e}')
-                    except Exception:
-                        pass
+                    print(f'Upload plot failed: {e}')
         except Exception:
             pass
 
