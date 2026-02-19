@@ -397,7 +397,7 @@ def main(pt, visit_start, visit_end, ax):
             watch_df = pd.read_csv(watch_fp)
 
             # Parse timestamps, convert to Central time
-            watch_df['time'] = pd.to_datetime(watch_df['time'].values).tz_localize('UTC').tz_convert(TZ)
+            watch_df['time'] = pd.to_datetime(watch_df['time'].values).tz_convert(TZ)
 
             # Keep only data inside visit window
             watch_df = watch_df[(watch_df['time'] >= visit_start) & (watch_df['time'] <= visit_end)]
