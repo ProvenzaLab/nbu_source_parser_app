@@ -145,6 +145,7 @@ class PlotThread(QThread):
         self.visit_end = visit_end
 
     def run(self):
+        self.progress.emit('Starting background plot process...')
         try:
             script_path = Path(__file__).parent / 'plot_worker.py'
             safe_pt = self.pt
@@ -157,7 +158,6 @@ class PlotThread(QThread):
             pickle_path = str(tmp / f'plot_{safe_pt}_{safe_start}_{safe_end}.pkl')
 
             cmd = [sys.executable, str(script_path), self.pt, self.visit_start, self.visit_end, png_path, pdf_path, pickle_path]
-            self.progress.emit('Starting background plot process...')
             # Run subprocess (blocks this thread only)
             res = subprocess.run(cmd, capture_output=True, text=True)
             if res.returncode != 0:

@@ -272,7 +272,7 @@ def main(pt, visit_start, visit_end, ax):
         for logger_fp in logger_files:
             log_df = pd.read_csv(logger_fp)
             for j, log_row in log_df.iterrows():
-                if log_row['Notes'] == 'ABORTED':
+                if log_row['Notes'] == 'ABORTED' or log_row['Event'] == 'SESSION START' or log_row['Event'] == 'SESSION END':
                     continue
 
                 try:
@@ -397,7 +397,7 @@ def main(pt, visit_start, visit_end, ax):
             watch_df = pd.read_csv(watch_fp)
 
             # Parse timestamps, convert to Central time
-            watch_df['time'] = pd.to_datetime(watch_df['time']).dt.tz_localize('UTC').dt.tz_convert('America/Chicago')
+            watch_df['time'] = pd.to_datetime(watch_df['time'].values).tz_localize('UTC').tz_convert(TZ)
 
             # Keep only data inside visit window
             watch_df = watch_df[(watch_df['time'] >= visit_start) & (watch_df['time'] <= visit_end)]
