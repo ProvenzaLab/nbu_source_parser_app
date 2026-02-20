@@ -59,7 +59,7 @@ def get_files_from_folder(pt, visit_start, visit_end, modality, loc=None):
 
     elif modality == 'cgx':
         paths = get_folders_in_range(DATALAKE / study_id  / pt / 'NBU', visit_start.strftime('%Y-%m-%d'), visit_end.strftime('%Y-%m-%d'))
-        def func(path):   return glob.glob(os.path.join(Path(path) / 'CGX', "*.edf"))
+        def func(path):   return glob.glob(os.path.join(Path(path) / 'CGX', "*.cgx"))
 
     elif modality == 'video':
         paths = get_folders_in_range(DATALAKE / study_id / pt / 'NBU', visit_start.strftime('%Y-%m-%d'), visit_end.strftime('%Y-%m-%d'))
@@ -234,7 +234,7 @@ def main(pt, visit_start, visit_end, ax):
             end = lfp_df.times.values[end_idx - 1]
             color = [random.random() for _ in range(3)]
 
-            ax.axvspan(start, end, ymin=0.2, ymax=0.4, alpha=0.3, color=color)
+            ax.axvspan(start, end, ymin=0.1, ymax=0.3, alpha=0.3, color=color)
         
         # Add filenames to plot
         fn_handles = []
@@ -245,7 +245,7 @@ def main(pt, visit_start, visit_end, ax):
             label = f'{filename.split(os.sep)[-2]}/{filename.split(os.sep)[-1]}'
             color = [random.random() for _ in range(3)]
 
-            y = 0.1
+            y = 0.05
 
             ann = ax.annotate(
                 '',
@@ -323,14 +323,21 @@ def main(pt, visit_start, visit_end, ax):
             with open(oura_fp, 'r') as f:
                 raw = json.load(f)
             
-            for block in raw:
-                sleep_start = datetime.strptime(block['bedtime_start'], '%Y-%m-%dT%H:%M:%S%z')
-                sleep_end = datetime.strptime(block['bedtime_end'], '%Y-%m-%dT%H:%M:%S%z')
-                type = block['type']
+           
+                for block in raw:
+                    try:
+                        sleep_start = datetime.strptime(block['bedtime_start'], '%Y-%m-%dT%H:%M:%S%z')
+                        sleep_end = datetime.strptime(block['bedtime_end'], '%Y-%m-%dT%H:%M:%S%z')
+                    except ValueError:
+                        sleep_start = datetime.strptime(block['bedtime_start'], '%Y-%m-%dT%H:%M:%S.%f%z')
+                        sleep_end = datetime.strptime(block['bedtime_end'], '%Y-%m-%dT%H:%M:%S.%f%z')
+                    except Exception as e:
+                        continue
+                    type = block['type']
 
-                if visit_start < sleep_start and sleep_end < visit_end:
-                    ax.axvspan(sleep_start, sleep_end, ymin=0.85, ymax=0.87, color='lightblue', zorder=5)
-                    ax.text(sleep_start, 0.88, f'{type}', zorder=5, fontsize=8, va='bottom', ha='left')
+                    if visit_start < sleep_start and sleep_end < visit_end:
+                        ax.axvspan(sleep_start, sleep_end, ymin=0.85, ymax=0.87, color='lightblue', zorder=5)
+                        ax.text(sleep_start, 0.88, f'{type}', zorder=5, fontsize=8, va='bottom', ha='left')
 
         # Add oura met data
         met_inset = ax.inset_axes([0, 0.5, 1, 0.1])
@@ -426,8 +433,6 @@ def main(pt, visit_start, visit_end, ax):
         
             label = f'CGX sleep starting {start_date}'
             ax.axvspan(cgx_start, cgx_end, ymin=0.93, ymax=0.95, color='purple', zorder=5)
-            ax.text(cgx_start, 0.955, label, zorder=5, fontsize=8, va='bottom', ha='left')
-
 
     ########################
     # Plot formatting      #
