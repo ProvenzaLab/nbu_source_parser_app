@@ -124,7 +124,10 @@ def sort_cgx(cgx_files, pt):
 
     for file in cgx_files:
         file_seg = str(file).split('.')[0].split('_')
-        date = f'{file_seg[-6]}-{file_seg[-5]}-{file_seg[-4]}'
+        month = file_seg[4] if len(file_seg[4]) == 2 else '0' + file_seg[4]
+        day = file_seg[3] if len(file_seg[3]) == 2 else '0' + file_seg[3]
+
+        date = f'20{file_seg[5]}-{month}-{day}'
 
         save_dir = ROOT / 'CGX_DATA' / study_id / pt / date
         os.makedirs(save_dir, exist_ok=True)
@@ -136,3 +139,7 @@ def sort_cgx(cgx_files, pt):
             continue
         
     return
+
+if __name__ == '__main__':
+
+    sort_cgx((ROOT / 'CGX_DATA').glob('*.cgx'), 'TRBD001')

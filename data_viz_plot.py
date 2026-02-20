@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import json
 from percept_parser.percept import PerceptParser
-from config import STUDY_IDS, DATALAKE, TZ, LOGGER_COLORS 
+from config import STUDY_IDS, DATALAKE, TZ, LOGGER_COLORS, ROOT 
 
 def get_folders_in_range(parent_dir, start_folder_name, end_folder_name):
     """
@@ -466,3 +466,16 @@ def main(pt, visit_start, visit_end, ax):
         ax.legend(handles=log_handles, labels=log_labels, loc='center left', bbox_to_anchor=(1, 0.75), title="Logger Events", fontsize="small")
 
     return ax
+
+if __name__ == '__main__':
+    # Manual usage
+
+    pt = 'TRBD001'  # Change as needed
+    visit_start = '2026-02-19T08:00:00'  # Change as needed
+    visit_end = '2026-02-20T08:00:00'   # Change as needed
+
+    fig, ax = plt.subplots(figsize=(15, 8), constrained_layout=True)
+    ax = main(pt, visit_start, visit_end, ax)
+    fig.tight_layout()
+    fig.savefig(ROOT / 'SUMMARY_PLOTS' / f'{pt}_{visit_start[:10]}_to_{visit_end[:10]}_summary.png', dpi=150, bbox_inches='tight')
+    plt.show()
