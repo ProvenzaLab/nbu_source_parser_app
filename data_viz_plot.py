@@ -299,7 +299,6 @@ def main(pt, visit_start, visit_end, ax):
     # Video Plotting
     if plot_video:
         for i, (video_files, color) in enumerate([(sleep_video_files, '#7fc97f'), (lounge_video_files, '#beaed4')]):
-            times = []
             for video_fp in video_files:
                 with open(video_fp, 'r') as f:
                     try:
@@ -307,15 +306,10 @@ def main(pt, visit_start, visit_end, ax):
                     except Exception as e:
                         print(f"Error reading {video_fp} for {pt} on {visit_start.strftime('%Y-%m-%d')}: {e}")
                         continue
-                times.extend(raw["real_times"])
-            times = pd.to_datetime(times).tz_localize('UTC').tz_convert(TZ)
-            times = times[(times >= visit_start) & (times <= visit_end)]
-            if not times.empty:
-                segments = find_continuous_segments(times.values, max_gap=1) # max gap 1 sec
-                for start_idx, end_idx in segments:
-                    start = times.values[start_idx]
-                    end = times.values[end_idx - 1]
-                    ax.axvspan(start, end, ymin=(0.34 + i * 0.1), ymax=(0.36 + i * 0.1), color=color)
+                times = pd.to_datetime(raw["real_times"]).tz_localize('UTC').tz_convert(TZ)
+                times = times[(times >= visit_start) & (times <= visit_end)]
+                if len(times) != 0:
+                    ax.axvspan(times.values[0], times.values[-1], ymin=(0.34 + i * 0.1), ymax=(0.36 + i * 0.1), color=color)
             
     # Oura plotting
     if plot_oura:
