@@ -469,9 +469,9 @@ def main(pt, visit_start, visit_end, ax):
 if __name__ == '__main__':
     # Manual usage
 
-    pt = 'TRBD001'  # Change as needed
-    visit_start = '2026-02-19T08:00:00'  # Change as needed
-    visit_end = '2026-02-20T08:00:00'   # Change as needed
+    pt = ''  # Change as needed
+    visit_start = ''  # Change as needed
+    visit_end = ''   # Change as needed
 
     fig, ax = plt.subplots(figsize=(15, 8), constrained_layout=True)
     ax = main(pt, visit_start, visit_end, ax)
