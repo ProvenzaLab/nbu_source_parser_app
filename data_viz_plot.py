@@ -5,68 +5,98 @@ import matplotlib.dates as mdates
 import matplotlib.patches as mpatches
 import random
 import os
-import glob
+import fnmatch
+import stat as stat_module
+import tempfile
 from datetime import datetime, timedelta
-from pathlib import Path
 import json
 from percept_parser.percept import PerceptParser
-from config import STUDY_IDS, DATALAKE, TZ, LOGGER_COLORS, ROOT 
+from config import STUDY_IDS, TZ, LOGGER_COLORS, ROOT, connect_datalake
+from prepare_files import save_object_remote
 
-def get_folders_in_range(parent_dir, start_folder_name, end_folder_name):
+
+def sftp_list_files(sftp, directory, pattern, recursive=False):
+    """List files in a remote directory matching a glob pattern.
+
+    If recursive=True, walks subdirectories to find all matching files.
     """
-    Gets all subfolders in a parent directory that fall alphabetically 
+    dir_str = str(directory)
+    if not recursive:
+        try:
+            entries = sftp.listdir(dir_str)
+        except (FileNotFoundError, IOError):
+            return []
+        return [f"{dir_str}/{f}" for f in entries if fnmatch.fnmatch(f, pattern)]
+
+    results = []
+    def _walk(dir_path):
+        try:
+            entries = sftp.listdir_attr(dir_path)
+        except (FileNotFoundError, IOError):
+            return
+        for entry in entries:
+            full_path = f"{dir_path}/{entry.filename}"
+            if stat_module.S_ISDIR(entry.st_mode):
+                _walk(full_path)
+            elif fnmatch.fnmatch(entry.filename, pattern):
+                results.append(full_path)
+    _walk(dir_str)
+    return results
+
+
+def get_folders_in_range(sftp, parent_dir, start_folder_name, end_folder_name):
+    """
+    Gets all subfolders in a remote parent directory that fall alphabetically
     between the start and end folder names.
 
     Args:
-        parent_dir (str/Path): The path to the main directory to search in.
+        sftp: paramiko SFTPClient instance.
+        parent_dir (str/Path): The remote path to the main directory to search in.
         start_folder_name (str): The starting boundary folder name (inclusive).
         end_folder_name (str): The ending boundary folder name (inclusive).
 
     Returns:
         list: A list of full paths to the folders within the range.
     """
-    p = Path(parent_dir)
-    # List all items in the directory and filter for actual directories
-    all_entries = [entry for entry in p.iterdir() if entry.is_dir()]
-    
-    # Sort the list alphabetically by name
-    all_entries.sort(key=lambda x: x.name)
-    
-    # Filter for entries within the specified range (inclusive)
+    parent_str = str(parent_dir)
+    entries = sftp.listdir_attr(parent_str)
+    dirs = [e for e in entries if stat_module.S_ISDIR(e.st_mode)]
+    dirs.sort(key=lambda x: x.filename)
+
     folders_in_range = []
-    for entry in all_entries:
-        name = entry.name
+    for entry in dirs:
+        name = entry.filename
         if start_folder_name <= name <= end_folder_name:
-            folders_in_range.append(str(entry.resolve())) # Use resolve() for absolute path
-            
+            folders_in_range.append(f"{parent_str}/{name}")
+
     return folders_in_range
 
-def get_files_from_folder(pt, visit_start, visit_end, modality, loc=None):
+def get_files_from_folder(sftp, datalake, pt, visit_start, visit_end, modality, loc=None):
     study_id = STUDY_IDS[pt[:-3]]
     arr = []
 
     if modality == 'logger':
-        paths = get_folders_in_range(DATALAKE / study_id  / pt / 'NBU', visit_start.strftime('%Y-%m-%d'), visit_end.strftime('%Y-%m-%d'))
-        def func(path):   return glob.glob(os.path.join(Path(path) / 'events', "*.csv"))
-    
+        paths = get_folders_in_range(sftp, datalake / study_id  / pt / 'NBU', visit_start.strftime('%Y-%m-%d'), visit_end.strftime('%Y-%m-%d'))
+        def func(path):   return sftp_list_files(sftp, f"{path}/events", "*.csv")
+
     elif modality == 'oura':
-        paths = get_folders_in_range(DATALAKE / study_id  / pt / 'oura', visit_start.strftime('%Y-%m-%d'), visit_end.strftime('%Y-%m-%d'))
-        def func(path):   return glob.glob(os.path.join(Path(path), f"{loc}.json"))
+        paths = get_folders_in_range(sftp, datalake / study_id  / pt / 'oura', visit_start.strftime('%Y-%m-%d'), visit_end.strftime('%Y-%m-%d'))
+        def func(path):   return sftp_list_files(sftp, path, f"{loc}.json")
 
     elif modality == 'apple':
-        paths = get_folders_in_range(DATALAKE / study_id  / pt / 'rune', visit_start.strftime('%Y-%m-%d'), visit_end.strftime('%Y-%m-%d'))
-        def func(path): return glob.glob(os.path.join(Path(path) / "heart_rate" ,  "apple_watch*.csv"))
+        paths = get_folders_in_range(sftp, datalake / study_id  / pt / 'rune', visit_start.strftime('%Y-%m-%d'), visit_end.strftime('%Y-%m-%d'))
+        def func(path): return sftp_list_files(sftp, f"{path}/heart_rate", "apple_watch*.csv")
 
     elif modality == 'cgx':
-        paths = get_folders_in_range(DATALAKE / study_id  / pt / 'NBU', visit_start.strftime('%Y-%m-%d'), visit_end.strftime('%Y-%m-%d'))
-        def func(path):   return glob.glob(os.path.join(Path(path) / 'CGX', "*.cgx"))
+        paths = get_folders_in_range(sftp, datalake / study_id  / pt / 'NBU', visit_start.strftime('%Y-%m-%d'), visit_end.strftime('%Y-%m-%d'))
+        def func(path):   return sftp_list_files(sftp, f"{path}/CGX", "*.cgx")
 
     elif modality == 'video':
-        paths = get_folders_in_range(DATALAKE / study_id / pt / 'NBU', visit_start.strftime('%Y-%m-%d'), visit_end.strftime('%Y-%m-%d'))
-        def func(path):   return glob.glob(os.path.join(Path(path) / 'video' / loc, "*.json"))
+        paths = get_folders_in_range(sftp, datalake / study_id / pt / 'NBU', visit_start.strftime('%Y-%m-%d'), visit_end.strftime('%Y-%m-%d'))
+        def func(path):   return sftp_list_files(sftp, f"{path}/video/{loc}", "*.json")
     else:
         return ValueError
-    
+
     for path in paths:
         arr.extend(func(path))
 
@@ -74,7 +104,7 @@ def get_files_from_folder(pt, visit_start, visit_end, modality, loc=None):
 
 def get_cgx_times(file_name):
 
-    file_seg = file_name.split(os.sep)[-1].split('.')[0].split('_')
+    file_seg = file_name.split('/')[-1].split('.')[0].split('_')
     end_time = datetime.strptime(f'{file_seg[-6]}-{file_seg[-5]}-{file_seg[-4]}T{file_seg[-3]}:{file_seg[-2]}:{file_seg[-1]}', '%d-%m-%yT%H:%M:%S')
     file_seg = file_seg[:-7]
     start_time = datetime.strptime(f'{file_seg[-6]}-{file_seg[-5]}-{file_seg[-4]}T{file_seg[-3]}:{file_seg[-2]}:{file_seg[-1]}', '%d-%m-%yT%H:%M:%S')
@@ -87,174 +117,199 @@ def get_cgx_times(file_name):
 def find_continuous_segments(times, max_gap=1.0):
     """
     Find continuous segments in datetime array.
-    
+
     Parameters:
     - times: array of datetime objects
     - max_gap: maximum gap to consider continuous (seconds)
-    
+
     Returns:
     - List of (start_idx, end_idx) tuples for each segment
     """
     if len(times) == 0:
         return []
-    
+
     # Convert to numpy array if not already
     times = np.array(times)
-    
+
     # Calculate time differences in seconds
     gaps = np.diff(times) / np.timedelta64(1, 's')
-    
+
     # Find where gaps exceed threshold
     break_points = np.where(gaps >= max_gap)[0]
-    
+
     # Build segments
     segments = []
     start_idx = 0
-    
+
     for break_idx in break_points:
         segments.append((start_idx, break_idx + 1))
         start_idx = break_idx + 1
-    
+
     # Add final segment
     segments.append((start_idx, len(times)))
-    
+
     return segments
 
-def read_lfp_data(pt, visit_start, visit_end):
+def read_lfp_data(sftp, datalake, pt, visit_start, visit_end):
     study_id = STUDY_IDS[pt[:-3]]
-    # Lab worlds folder
-    #target_folder = Path('/mnt/projectworlds') / study_id / pt / 'NBU' / 'compiled_LFP'
-    #os.makedirs(target_folder, exist_ok=True)
 
     # Gather all LFP files that were 'uploaded' (modified) after the visit start
-    lfp_path = DATALAKE / study_id / pt / 'LFP'
-    paths = glob.glob(os.path.join(f'{lfp_path}/**/*.json'), recursive=True)
+    lfp_path = datalake / study_id / pt / 'LFP'
+    paths = sftp_list_files(sftp, lfp_path, "*.json", recursive=True)
 
     lfp_files = []
-    start_timestamp = visit_start.replace(tzinfo=None)
+    start_timestamp = visit_start.replace(tzinfo=None).timestamp()
     for fp in paths:
-        mod_time = datetime.fromtimestamp(os.path.getmtime(fp))
+        mod_time = sftp.stat(fp).st_mtime
         if start_timestamp < mod_time:
             lfp_files.append(fp)
 
     if len(lfp_files) == 0:
         return None
-    
-    # Run percept parser on the LFP files to create a single dataframe
+
+    # Download LFP files to temp directory for PerceptParser
     chunks = []
-    for filename in lfp_files:
-        try:
-            parser = PerceptParser(filename)
-            # skip if lead location is not VC/VS, for now
-            if parser.lead_location != 'OTHER' and parser.lead_location != 'AIC':
-                print(f'Skipping {filename}, lead location: {parser.lead_location}')
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        for remote_fp in lfp_files:
+            local_fp = os.path.join(tmp_dir, os.path.basename(remote_fp))
+            sftp.get(remote_fp, local_fp)
+
+            try:
+                parser = PerceptParser(local_fp)
+                # skip if lead location is not VC/VS, for now
+                if parser.lead_location != 'OTHER' and parser.lead_location != 'AIC':
+                    print(f'Skipping {remote_fp}, lead location: {parser.lead_location}')
+                    continue
+                td_data = parser.read_timedomain_data(indefinite_streaming=False)
+                id_data = parser.read_timedomain_data(indefinite_streaming=True)
+            except Exception as e:
+                print(f'Error processing {remote_fp}: {e}')
                 continue
-            td_data = parser.read_timedomain_data(indefinite_streaming=False)
-            id_data = parser.read_timedomain_data(indefinite_streaming=True)
-        except Exception as e:
-            print(f'Error processing {filename}: {e}')
-            continue
 
-        if len(td_data) != 0:
-            td_df = pd.concat(td_data)
-            td_df['filename'] = filename
-            chunks.append(td_df)
+            if len(td_data) != 0:
+                td_df = pd.concat(td_data)
+                td_df['filename'] = remote_fp
+                chunks.append(td_df)
 
-        if len(id_data) != 0:
-            id_df = pd.concat(id_data)
-            id_df['filename'] = filename
-            chunks.append(id_df)
+            if len(id_data) != 0:
+                id_df = pd.concat(id_data)
+                id_df['filename'] = remote_fp
+                chunks.append(id_df)
 
-        else:
-            print(f'No time domain data for {filename}')
+            else:
+                print(f'No time domain data for {remote_fp}')
 
     if len(chunks) == 0:
         print(f'No Time Domain data for {pt}')
         return
-    
+
     pt_df = pd.concat(chunks)
     pt_df.sort_index()
 
     # Convert timestamps to Central + create times column
-    pt_df['times'] = pt_df.index.to_series().dt.tz_localize('UTC').dt.tz_convert('America/Chicago')
+    pt_df['CT_times'] = pt_df.index.to_series().dt.tz_localize('UTC').dt.tz_convert('America/Chicago')
+    pt_df.query('@visit_start <= CT_times <= @visit_end', inplace=True)
 
-    #pt_df.to_pickle(target_folder / f'{visit_start.strftime("%Y-%m-%d_%H-%M-%S")}-{visit_end.strftime("%Y-%m-%d_%H-%M-%S")}_visit_timedomain.pkl')
+    # Create columns for other info
+    pt_df['lead_location'] = parser.lead_location
+    pt_df['lead_model'] = parser.lead_model
+    pt_df['ipg_hemisphere'] = remote_fp.split('/')[-2]
+
+    # Project worlds folder
+    try:
+        target_folder = f'/mnt/projectworlds/{study_id}/{pt}/NBU/compiled_LFP'
+        save_object_remote(target_folder, pt_df, obj_type='file', filename=f'{pt}_{visit_start.strftime("%Y-%m-%d")}-{visit_end.strftime("%Y-%m-%d")}_timedomain_LFP.parq')
+    except Exception as e:
+        print(f'Error saving to project worlds: {e}')
+        pass
+
+    # Save local copy
+    target_folder = ROOT / 'COMPILED_LFP' / study_id / pt / 'NBU' / 'compiled_LFP'
+    os.makedirs(target_folder, exist_ok=True)
+    pt_df.to_parquet(target_folder / f'{pt}_{visit_start.strftime("%Y-%m-%d")}-{visit_end.strftime("%Y-%m-%d")}_timedomain_LFP.parq')
     return pt_df
 
 
 def main(pt, visit_start, visit_end, ax):
     visit_start = datetime.strptime(visit_start, '%Y-%m-%dT%H:%M:%S').replace(tzinfo=TZ)
     visit_end = datetime.strptime(visit_end, '%Y-%m-%dT%H:%M:%S').replace(tzinfo=TZ)
-    
+    study_id = STUDY_IDS[pt[:-3]]
+
+    ssh, sftp, datalake = connect_datalake()
+
     try:
-        logger_files = get_files_from_folder(pt, visit_start, visit_end, 'logger')
+        logger_files = get_files_from_folder(sftp, datalake, pt, visit_start, visit_end, 'logger')
         plot_logger = True
     except FileNotFoundError:
         print(f'No logger data uploaded to Elias for {pt}, {visit_start} visit')
         plot_logger = False
     try:
-        oura_sleep_files = get_files_from_folder(pt, visit_start, visit_end, 'oura', 'sleep')
-        oura_met_files = get_files_from_folder(pt, visit_start, visit_end, 'oura', 'daily_activity')
+        oura_sleep_files = get_files_from_folder(sftp, datalake, pt, visit_start, visit_end, 'oura', 'sleep')
+        oura_met_files = get_files_from_folder(sftp, datalake, pt, visit_start, visit_end, 'oura', 'daily_activity')
         plot_oura = True
     except FileNotFoundError:
         print(f'No Oura data on Elias for {pt} between {visit_start} and {visit_end}')
         plot_oura = False
     try:
-        cgx_files = get_files_from_folder(pt, visit_start, visit_end, 'cgx')
+        cgx_files = get_files_from_folder(sftp, datalake, pt, visit_start, visit_end, 'cgx')
         plot_cgx = True
     except FileNotFoundError:
         print(f'No CGX data uploaded to Elias for {pt} on {visit_start} visit')
         plot_cgx = False
     try:
-        sleep_video_files = get_files_from_folder(pt, visit_start, visit_end, 'video', 'sleep')
-        lounge_video_files = get_files_from_folder(pt, visit_start, visit_end, 'video', 'lounge')
+        sleep_video_files = get_files_from_folder(sftp, datalake, pt, visit_start, visit_end, 'video', 'sleep')
+        lounge_video_files = get_files_from_folder(sftp, datalake, pt, visit_start, visit_end, 'video', 'lounge')
         plot_video = True
     except FileNotFoundError:
         print(f'No video data uploaded to Elias for {pt} on {visit_start} visit')
         plot_video = False
     try:
-        lfp_df = read_lfp_data(pt, visit_start, visit_end)
+        lfp_fn = ROOT / 'COMPILED_LFP' / study_id / pt / 'NBU' / 'compiled_LFP' / f'{pt}_{visit_start.strftime("%Y-%m-%d")}-{visit_end.strftime("%Y-%m-%d")}_timedomain_LFP.parquet'
+        if lfp_fn.exists():
+            lfp_df = pd.read_parquet(lfp_fn)
+        else:
+            lfp_df = read_lfp_data(sftp, datalake, pt, visit_start, visit_end)
         plot_lfp = True
     except Exception as e:
         print(f'Error retrieving LFP data for {pt} on {visit_start} visit: {e}')
         plot_lfp = False
     if lfp_df is None:
         plot_lfp = False
-    
+
     # LFP Plotting
     if plot_lfp:
-        lfp_df.dropna(subset=lfp_df.columns.difference(['filename', 'times']), how='all', inplace=True)
-        lfp_df.sort_values(by='times', inplace=True)
+        lfp_df.dropna(subset=lfp_df.columns.difference(['filename', 'CT_times']), how='all', inplace=True)
+        lfp_df.sort_values(by='CT_times', inplace=True)
 
         # Plot each continuous segment of TimeDomain data
-        segments = find_continuous_segments(lfp_df.times.values)
+        segments = find_continuous_segments(lfp_df.CT_times.values)
 
         for start_idx, end_idx in segments:
-            start = lfp_df.times.values[start_idx]
-            end = lfp_df.times.values[end_idx - 1]
+            start = lfp_df.CT_times.values[start_idx]
+            end = lfp_df.CT_times.values[end_idx - 1]
             color = [random.random() for _ in range(3)]
 
             ax.axvspan(start, end, ymin=0.1, ymax=0.3, alpha=0.3, color=color)
-        
+
         # Add filenames to plot
         fn_handles = []
         fn_patches = []
         for filename, group in lfp_df.groupby('filename'):
-            start = group.times.values[0]
-            end = group.times.values[-1]
-            label = f'{filename.split(os.sep)[-2]}/{filename.split(os.sep)[-1]}'
+            start = group.CT_times.values[0]
+            end = group.CT_times.values[-1]
+            label = f'{filename.split("/")[-2]}/{filename.split("/")[-1]}'
             color = [random.random() for _ in range(3)]
 
             y = 0.05
 
             ann = ax.annotate(
                 '',
-                xy=(end, y),          
-                xytext=(start, y),    
+                xy=(end, y),
+                xytext=(start, y),
                 arrowprops=dict(
-                    arrowstyle="|-|",      
+                    arrowstyle="|-|",
                     color=color,
-                    lw=2,                 
+                    lw=2,
                 )
             )
 
@@ -270,7 +325,8 @@ def main(pt, visit_start, visit_end, ax):
     # Logger Plotting
     if plot_logger:
         for logger_fp in logger_files:
-            log_df = pd.read_csv(logger_fp)
+            with sftp.open(logger_fp) as f:
+                log_df = pd.read_csv(f)
             for j, log_row in log_df.iterrows():
                 if log_row['Notes'] == 'ABORTED' or log_row['Event'] == 'SESSION START' or log_row['Event'] == 'SESSION END':
                     continue
@@ -279,7 +335,7 @@ def main(pt, visit_start, visit_end, ax):
                     log_start = datetime.strptime(f"{log_row['Start Date']} {log_row['Start Time']}".strip(), '%Y-%m-%d %H:%M:%S').replace(tzinfo=TZ)
                     log_end = datetime.strptime(f"{log_row['End Date']} {log_row['End Time']}".strip(), '%Y-%m-%d %H:%M:%S').replace(tzinfo=TZ)
                     if log_end < log_start or log_start < visit_start or visit_end < log_start:
-                        continue   
+                        continue
 
                     label = f"{log_start.strftime('%I:%M %p')} - {log_end.strftime('%I:%M %p')}: {log_row['Event']}"
                     if log_row['Event'] not in log_colors:
@@ -290,9 +346,12 @@ def main(pt, visit_start, visit_end, ax):
                         color = log_colors[log_row['Event']]
 
                     ax.axvspan(log_start, log_end, ymin=0.7, ymax=0.8, color=color, label=label, zorder=5)
-                    
+
                     log_handles.append(mpatches.Patch(color=color))
                     log_labels.append(label)
+
+                    if log_row['Event'] == 'IPG Charging':
+                        ax.axvspan(log_start, log_end, ymin=0.315, ymax=0.32, color=log_colors['IPG Charging'], zorder=5)
                 except:
                     pass
 
@@ -300,24 +359,24 @@ def main(pt, visit_start, visit_end, ax):
     if plot_video:
         for i, (video_files, color) in enumerate([(sleep_video_files, '#7fc97f'), (lounge_video_files, '#beaed4')]):
             for video_fp in video_files:
-                with open(video_fp, 'r') as f:
+                with sftp.open(video_fp) as f:
                     try:
-                        raw = json.load(f)
+                        raw = json.loads(f.read().decode('utf-8'))
                     except Exception as e:
                         print(f"Error reading {video_fp} for {pt} on {visit_start.strftime('%Y-%m-%d')}: {e}")
                         continue
                 times = pd.to_datetime(raw["real_times"]).tz_localize('UTC').tz_convert(TZ)
                 times = times[(times >= visit_start) & (times <= visit_end)]
                 if len(times) != 0:
-                    ax.axvspan(times.values[0], times.values[-1], ymin=(0.34 + i * 0.1), ymax=(0.36 + i * 0.1), color=color)
-            
+                    ax.axvspan(times.values[0], times.values[-1], ymin=(0.34 + i * 0.05), ymax=(0.36 + i * 0.05), color=color)
+
     # Oura plotting
     if plot_oura:
         for oura_fp in oura_sleep_files:
-            with open(oura_fp, 'r') as f:
-                raw = json.load(f)
-            
-           
+            with sftp.open(oura_fp) as f:
+                raw = json.loads(f.read().decode('utf-8'))
+
+
                 for block in raw:
                     try:
                         sleep_start = datetime.strptime(block['bedtime_start'], '%Y-%m-%dT%H:%M:%S%z')
@@ -336,8 +395,8 @@ def main(pt, visit_start, visit_end, ax):
         # Add oura met data
         met_inset = ax.inset_axes([0, 0.5, 1, 0.1])
         for oura_fp in oura_met_files:
-            with open(oura_fp, 'r') as f:
-                raw = json.load(f)
+            with sftp.open(oura_fp) as f:
+                raw = json.loads(f.read().decode('utf-8'))
 
                 for block in raw:
 
@@ -384,18 +443,19 @@ def main(pt, visit_start, visit_end, ax):
         met_inset.spines['bottom'].set_visible(False)
         met_inset.set_xticks([])
         met_inset.set_yticks([])
-    
+
     # Add Apple watch data availability (only TRBD pts)
     if pt[:-3] == 'TRBD':
         try:
-            watch_files = get_files_from_folder(pt, visit_start, visit_end, 'apple')
+            watch_files = get_files_from_folder(sftp, datalake, pt, visit_start, visit_end, 'apple')
         except FileNotFoundError:
             print(f'No Apple Watch data uploaded to Elias for {pt} on {visit_start} visit')
             watch_files = []
 
         aw_inset = ax.inset_axes([0, 0.6, 1, 0.1])
         for watch_fp in watch_files:
-            watch_df = pd.read_csv(watch_fp)
+            with sftp.open(watch_fp) as f:
+                watch_df = pd.read_csv(f)
 
             # Parse timestamps, convert to Central time
             watch_df['time'] = pd.to_datetime(watch_df['time'].values).tz_convert(TZ)
@@ -405,7 +465,7 @@ def main(pt, visit_start, visit_end, ax):
 
             if watch_df.empty:
                 continue
-            
+
             watch_df.dropna(subset=['rpm'], inplace=True)
             segments = find_continuous_segments(watch_df.time.values, max_gap=600)
 
@@ -422,11 +482,12 @@ def main(pt, visit_start, visit_end, ax):
     # CGX Plotting
     if plot_cgx:
         for cgx_fp in cgx_files:
-            start_date = cgx_fp.split(os.sep)[-3]
             cgx_start, cgx_end = get_cgx_times(cgx_fp)
-        
-            label = f'CGX sleep starting {start_date}'
             ax.axvspan(cgx_start, cgx_end, ymin=0.93, ymax=0.95, color='purple', zorder=5)
+
+    # Close SFTP connection
+    sftp.close()
+    ssh.close()
 
     ########################
     # Plot formatting      #
@@ -435,34 +496,34 @@ def main(pt, visit_start, visit_end, ax):
     # Iterate through each day in the range
     # Add vertical dotted lines for each day
     current_day = visit_start.replace(hour=0, minute=0, second=0, microsecond=0)
-        
+
     # Add label for the starting day at the start of the plot
-    ax.text(visit_start + pd.Timedelta(minutes=10), ax.get_ylim()[1] - 0.01, visit_start.strftime('%b %d'), 
+    ax.text(visit_start + pd.Timedelta(minutes=10), ax.get_ylim()[1] - 0.01, visit_start.strftime('%b %d'),
             rotation=0, fontsize=9, ha='left', va='top', weight='bold')
     while current_day <= visit_end:
         next_day = current_day + pd.Timedelta(days=1)
-        
+
         if next_day > visit_start and next_day <= visit_end:
             ax.axvline(next_day, color='black', linestyle=':', linewidth=1, alpha=0.7, zorder=10)
-            ax.text(next_day + pd.Timedelta(minutes=10), ax.get_ylim()[1] - 0.01, next_day.strftime('%b %d'), 
+            ax.text(next_day + pd.Timedelta(minutes=10), ax.get_ylim()[1] - 0.01, next_day.strftime('%b %d'),
                     rotation=0, fontsize=9, ha='left', va='top', weight='bold')
-        
+
         current_day = next_day
-    
+
     ax.xaxis.set_major_formatter(mdates.DateFormatter('%I:%M %p', tz=TZ))
     ax.set_xlabel("Time (Hour:Minute)")
     ax.set_ylabel(" ")
-    ax.set_yticks([0.05, 0.2, 0.35, 0.45, 0.55, 0.65, 0.775, 0.86, 0.94])
+    ax.set_yticks([0.05, 0.2, 0.35, 0.40, 0.55, 0.65, 0.775, 0.86, 0.94])
     ax.set_yticklabels(['Files', 'Neural Data', 'Sleep Room Video', 'Lounge Video', 'MET Data', 'Apple Watch HR', 'Logger Events', 'Oura Sleep', 'CGX Data'])
     ax.set_title(f"{pt} NBU visit {visit_start} to {visit_end}")
     ax.set_xlim(visit_start, visit_end)
 
     # Create separate legends for files and logger events
     if plot_lfp:
-        file_legend = ax.legend(handles=fn_patches, labels=fn_handles, loc='center left', bbox_to_anchor=(1, 0.25), title='File Names', fontsize="small")
+        file_legend = ax.legend(handles=fn_patches, labels=fn_handles, loc='center left', bbox_to_anchor=(1.05, 0.20), title='File Names', fontsize="x-small")
         ax.add_artist(file_legend)
     if plot_logger:
-        ax.legend(handles=log_handles, labels=log_labels, loc='center left', bbox_to_anchor=(1, 0.75), title="Logger Events", fontsize="small")
+        ax.legend(handles=log_handles, labels=log_labels, loc='center left', bbox_to_anchor=(1.05, 0.75), title="Logger Events", fontsize="xx-small", ncols=2)
 
     return ax
 
@@ -473,8 +534,8 @@ if __name__ == '__main__':
     visit_start = ''  # Change as needed
     visit_end = ''   # Change as needed
 
-    fig, ax = plt.subplots(figsize=(15, 8), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(15, 8), constrained_layout=False)
     ax = main(pt, visit_start, visit_end, ax)
     fig.tight_layout()
-    fig.savefig(ROOT / 'SUMMARY_PLOTS' / f'{pt}_{visit_start[:10]}_to_{visit_end[:10]}_summary.png', dpi=150, bbox_inches='tight')
+    fig.savefig(ROOT / 'SUMMARY_PLOTS' / f'{pt}_{visit_start[:10]}_to_{visit_end[:10]}_summary.pdf', dpi=150, bbox_inches='tight')
     plt.show()

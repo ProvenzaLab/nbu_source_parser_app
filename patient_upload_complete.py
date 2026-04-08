@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 
 from data_viz_plot import main as plot_data_summary
 from prepare_files import sort_lfp, sort_cgx, save_object_remote
-from config import STUDY_IDS, DATALAKE, ROOT
+from config import STUDY_IDS, ROOT, connect_datalake
 
 # ============================================================================
 # DATA PROCESSOR
@@ -35,8 +35,8 @@ from config import STUDY_IDS, DATALAKE, ROOT
 class DataProcessor:
     """Handles all data processing and database operations"""
     
-    def __init__(self, data_root_path=DATALAKE):
-        self.data_root_path = Path(data_root_path)        
+    def __init__(self):
+        self.ssh, self.sftp, self.datalake = connect_datalake()
     
     def process_lfp_upload(self, patient_id, visit_start, visit_end):
         try:
@@ -212,8 +212,15 @@ class VisualizationWidget(QWidget):
         self.canvas.draw()
 
         # Lab worlds folder (synchronous PDF save & upload)
-        target_folder = f'/mnt/projectworlds/{STUDY_IDS[upload_worker.patient_id[:-3]]}/{upload_worker.patient_id}/NBU/plots'
-        save_object_remote(target_folder, self.figure, obj_type='figure', filename=f'{upload_worker.visit_start.split("T")[0]}-{upload_worker.visit_end.split("T")[0]}_visit.pdf')
+        try:
+            target_folder = f'/mnt/projectworlds/{STUDY_IDS[upload_worker.patient_id[:-3]]}/{upload_worker.patient_id}/NBU/plots'
+            save_object_remote(target_folder, self.figure, obj_type='figure', filename=f'{upload_worker.visit_start.split("T")[0]}-{upload_worker.visit_end.split("T")[0]}_visit.pdf')
+        except Exception as e:
+            print(f'Error uploading plot to projectworlds: {e}')
+            pass
+        # Save a local version as well
+        self.figure.savefig(ROOT / 'SUMMARY_PLOTS' / f'{upload_worker.patient_id}_{upload_worker.visit_start.split("T")[0]}-{upload_worker.visit_end.split("T")[0]}_visit.pdf', dpi=150, bbox_inches='tight')
+
 
     def start_background_plot(self, patient_id, visit_start, visit_end):
         """Start plotting in a background process/thread which produces PNG/PDF outputs."""
@@ -288,9 +295,7 @@ class PatientDataUploadApp(QMainWindow):
         super().__init__()
         
         # Initialize data processor
-        self.processor = DataProcessor(
-            data_root_path=DATALAKE
-        )
+        self.processor = DataProcessor()
         
         self.uploaded_data = []
         self.upload_status = {
@@ -640,6 +645,8 @@ class PatientDataUploadApp(QMainWindow):
                 except Exception:
                     pass
 
+        self.processor.sftp.close()
+        self.processor.ssh.close()
         event.accept()
 
 

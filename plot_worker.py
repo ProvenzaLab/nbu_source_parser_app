@@ -30,7 +30,7 @@ def main():
         sys.exit(3)
 
     try:
-        fig, ax = plt.subplots(figsize=(15, 8), constrained_layout=True)
+        fig, ax = plt.subplots(figsize=(15, 8), constrained_layout=False)
         ax = dv.main(pt, visit_start, visit_end, ax)
         # Save outputs: PNG for quick preview, PDF for upload, and pickle the Figure
         fig.savefig(out_png, dpi=150, bbox_inches='tight')

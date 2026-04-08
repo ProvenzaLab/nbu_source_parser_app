@@ -8,3 +8,4 @@ scipy
 pypdf
 pyinstaller
 paramiko
+pyarrow
